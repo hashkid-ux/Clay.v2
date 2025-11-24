@@ -119,20 +119,18 @@ class BaseAgent extends EventEmitter {
     } catch (error) {
       this.clearTimeout();
       this.handleError(error);
+    }
+  }
+
   /**
-   * Cancel agent execution
+   * Start agent execution timeout
    */
-  async cancel() {
-    logger.info('Agent cancelled', { 
-      callId: this.callId,
-      agentType: this.constructor.name 
-    });
-    
-    this.isCancelled = true;
-    this.state = 'CANCELLED';
-    this.clearTimeout();
-    this.removeAllListeners(); // Clean up event listeners to prevent memory leaks
-  }       agentType: this.constructor.name
+  startTimeout() {
+    this.timeoutHandle = setTimeout(() => {
+      if (!this.isCancelled && this.state === 'RUNNING') {
+        logger.warn('Agent execution timeout', {
+          callId: this.callId,
+          agentType: this.constructor.name
         });
         this.handleError(new Error('Agent execution timeout'));
       }
@@ -160,6 +158,8 @@ class BaseAgent extends EventEmitter {
     
     this.isCancelled = true;
     this.state = 'CANCELLED';
+    this.clearTimeout();
+    this.removeAllListeners(); // Clean up event listeners to prevent memory leaks
   }
 
   /**
@@ -180,6 +180,8 @@ class BaseAgent extends EventEmitter {
     });
 
     this.emit('completed', result);
+  }
+
   /**
    * Handle error
    */
@@ -194,8 +196,6 @@ class BaseAgent extends EventEmitter {
     this.clearTimeout();
     this.emit('error', error);
     this.removeAllListeners(); // Clean up on error
-  } this.state = 'ERROR';
-    this.emit('error', error);
   }
 
   /**
