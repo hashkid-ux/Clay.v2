@@ -1,10 +1,10 @@
 // Backend/services/ShopifyService.js - Enhanced with all methods
 const logger = require('../utils/logger');
 const shopifyConnector = require('../shopify');
-const LRU = require('lru-cache');
+const { LRUCache } = require('lru-cache');
 
 // LRU Cache for optimizations (5 min TTL)
-const cache = new LRU({
+const cache = new LRUCache({
   max: 500,
   ttl: 1000 * 60 * 5
 });
