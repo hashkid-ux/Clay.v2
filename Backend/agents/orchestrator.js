@@ -2,13 +2,10 @@
 const logger = require('../utils/logger');
 const EventEmitter = require('events');
 
-// Import all agents (will be created next)
+// Import all agents
 const OrderLookupAgent = require('./types/OrderLookupAgent');
 const ReturnAgent = require('./types/ReturnAgent');
-const RefundAgent = require('./types/RefundAgent');
-const CancelOrderAgent = require('./types/CancelOrderAgent');
-const TrackingAgent = require('./types/TrackingAgent');
-const ComplaintAgent = require('./types/ComplaintAgent');
+const { RefundAgent, CancelOrderAgent, TrackingAgent, ComplaintAgent } = require('./types/RefundAgent');
 
 class AgentOrchestrator extends EventEmitter {
   constructor() {

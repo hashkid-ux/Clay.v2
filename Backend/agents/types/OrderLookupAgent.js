@@ -2,7 +2,7 @@
 const BaseAgent = require('../BaseAgent');
 const logger = require('../../utils/logger');
 const db = require('../../db/postgres');
-const shopifyConnector = require('../../backend/shopify');
+const ShopifyService = require('../../services/ShopifyService');
 
 class OrderLookupAgent extends BaseAgent {
   constructor(callId, initialData = {}) {
@@ -38,23 +38,8 @@ class OrderLookupAgent extends BaseAgent {
         confidence: 0.9
       });
 
-      // Call Shopify API (with retry logic)
-      let orderData;
-      try {
-        orderData = await shopifyConnector.getOrder(this.data.order_id);
-      } catch (error) {
-        logger.error('Shopify API error', { 
-          callId: this.callId,
-          error: error.message 
-        });
-
-        // Update action status
-        await db.actions.updateStatus(action.id, 'failed', {
-          error: error.message
-        });
-
-        throw new Error('Failed to fetch order from Shopify');
-      }
+      // Call Shopify Service
+      const orderData = await ShopifyService.getOrder(this.data.order_id);
 
       if (!orderData) {
         // Order not found
@@ -72,18 +57,10 @@ class OrderLookupAgent extends BaseAgent {
 
       // Get tracking info if order is shipped
       let trackingInfo = null;
-      if (orderData.fulfillment_status === 'fulfilled' || orderData.fulfillment_status === 'partial') {
-        try {
-          const trackingId = orderData.tracking_number;
-          if (trackingId) {
-            // Get tracking from Shiprocket or courier API
-            trackingInfo = await this.getTrackingInfo(trackingId);
-          }
-        } catch (error) {
-          logger.warn('Could not fetch tracking info', { 
-            callId: this.callId,
-            error: error.message 
-          });
+      if (orderData && (orderData.fulfillment_status === 'fulfilled' || orderData.fulfillment_status === 'partial')) {
+        const trackingId = orderData.tracking_number;
+        if (trackingId) {
+          trackingInfo = await ShopifyService.getTrackingInfo(trackingId);
         }
       }
 
@@ -107,20 +84,6 @@ class OrderLookupAgent extends BaseAgent {
     } catch (error) {
       this.handleError(error);
     }
-  }
-
-  /**
-   * Get tracking information
-   */
-  async getTrackingInfo(trackingId) {
-    // This will be implemented with Shiprocket integration
-    // For now, return mock data
-    return {
-      status: 'in_transit',
-      current_location: 'Mumbai Distribution Center',
-      eta: '2025-11-24T18:00:00+05:30',
-      last_update: 'Package out for delivery'
-    };
   }
 
   /**

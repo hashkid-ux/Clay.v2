@@ -2,7 +2,7 @@
 const BaseAgent = require('../BaseAgent');
 const logger = require('../../utils/logger');
 const db = require('../../db/postgres');
-const shopifyConnector = require('../../backend/shopify');
+const ShopifyService = require('../../services/ShopifyService');
 
 class ReturnAgent extends BaseAgent {
   constructor(callId, initialData = {}) {
@@ -43,15 +43,7 @@ class ReturnAgent extends BaseAgent {
       });
 
       // Step 1: Get order details
-      let orderData;
-      try {
-        orderData = await shopifyConnector.getOrder(this.data.order_id);
-      } catch (error) {
-        await db.actions.updateStatus(action.id, 'failed', {
-          error: error.message
-        });
-        throw new Error('Failed to fetch order');
-      }
+      const orderData = await ShopifyService.getOrder(this.data.order_id);
 
       if (!orderData) {
         await db.actions.updateStatus(action.id, 'failed', {
@@ -83,41 +75,24 @@ class ReturnAgent extends BaseAgent {
       }
 
       // Step 3: Create return request
-      let returnData;
-      try {
-        returnData = await shopifyConnector.createReturn({
-          order_id: orderData.id,
-          line_items: orderData.line_items.map(item => ({
-            id: item.id,
-            quantity: item.quantity
-          })),
-          reason: this.data.reason || 'Customer request',
-          customer_note: this.data.customer_note
-        });
-      } catch (error) {
-        logger.error('Failed to create return', { 
-          callId: this.callId,
-          error: error.message 
-        });
+      const returnData = await ShopifyService.createReturn({
+        order_id: orderData.id,
+        line_items: orderData.line_items.map(item => ({
+          id: item.id,
+          quantity: item.quantity
+        })),
+        reason: this.data.reason || 'Customer request',
+        customer_note: this.data.customer_note
+      });
 
-        await db.actions.updateStatus(action.id, 'failed', {
-          error: error.message
-        });
-
-        throw new Error('Failed to create return request');
+      if (!returnData) {
+        throw new Error('Failed to create return request in Shopify');
       }
 
       // Step 4: Schedule pickup (if applicable)
       let pickupData = null;
-      if (returnData && returnData.requires_pickup) {
-        try {
-          pickupData = await this.schedulePickup(orderData, returnData);
-        } catch (error) {
-          logger.warn('Could not schedule pickup', { 
-            callId: this.callId,
-            error: error.message 
-          });
-        }
+      if (returnData.requires_pickup) {
+        pickupData = await ShopifyService.schedulePickup(orderData, returnData);
       }
 
       // Update action status
@@ -182,23 +157,6 @@ class ReturnAgent extends BaseAgent {
     };
   }
 
-  /**
-   * Schedule pickup for return
-   */
-  async schedulePickup(orderData, returnData) {
-    // This will be implemented with Shiprocket/courier API
-    // For now, return mock data
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-
-    return {
-      pickup_id: 'PK' + Date.now(),
-      scheduled_date: tomorrow.toISOString(),
-      time_slot: '10:00 AM - 2:00 PM',
-      address: orderData.shipping_address,
-      status: 'scheduled'
-    };
-  }
 
   /**
    * Format context update for AI

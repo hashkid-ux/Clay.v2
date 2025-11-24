@@ -1,14 +1,14 @@
-// agents/types/RefundAgent.js
+// agents/types/CancelOrderAgent.js
 const BaseAgent = require('../BaseAgent');
 const logger = require('../../utils/logger');
 const db = require('../../db/postgres');
 const ShopifyService = require('../../services/ShopifyService');
 
-class RefundAgent extends BaseAgent {
+class CancelOrderAgent extends BaseAgent {
   constructor(callId, initialData = {}) {
     super(callId, initialData);
     this.requiredFields = ['order_id'];
-    this.agentType = 'RefundAgent';
+    this.agentType = 'CancelOrderAgent';
   }
 
   async execute() {
@@ -20,11 +20,11 @@ class RefundAgent extends BaseAgent {
       }
 
       this.state = 'RUNNING';
-      logger.info('Executing refund request', { callId: this.callId, orderId: this.data.order_id });
+      logger.info('Executing order cancellation', { callId: this.callId, orderId: this.data.order_id });
 
       const action = await db.actions.create({
         call_id: this.callId,
-        action_type: 'process_refund',
+        action_type: 'cancel_order',
         params: { order_id: this.data.order_id },
         confidence: 0.9
       });
@@ -37,18 +37,20 @@ class RefundAgent extends BaseAgent {
         return;
       }
 
-      const refundData = await ShopifyService.createRefund(orderData);
+      // Add eligibility check here (e.g., if order is already shipped)
 
-      if (!refundData) {
-        await db.actions.updateStatus(action.id, 'failed', { error: 'Refund processing failed' });
-        throw new Error('Failed to process refund in Shopify');
+      const cancellationData = await ShopifyService.cancelOrder(orderData);
+
+      if (!cancellationData) {
+        await db.actions.updateStatus(action.id, 'failed', { error: 'Cancellation failed' });
+        throw new Error('Failed to cancel order in Shopify');
       }
 
-      await db.actions.updateStatus(action.id, 'success', { refund: refundData });
+      await db.actions.updateStatus(action.id, 'success', { cancellation: cancellationData });
 
       this.complete({
         success: true,
-        contextUpdate: 'Refund request processed. Amount will be credited in 5-7 business days.'
+        contextUpdate: 'Order cancelled successfully. Refund will be processed within 24 hours.'
       });
 
     } catch (error) {
@@ -57,4 +59,4 @@ class RefundAgent extends BaseAgent {
   }
 }
 
-module.exports = RefundAgent;
+module.exports = CancelOrderAgent;
