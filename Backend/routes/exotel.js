@@ -1,7 +1,8 @@
 // routes/exotel.js - Exotel webhook handlers
 const { v4: uuidv4 } = require('uuid');
-const db = require('../db/postgres');
-const logger = require('../utils/logger');
+const resolve = require('../utils/moduleResolver');
+const db = require(resolve('db/postgres'));
+const logger = require(resolve('utils/logger'));
 
 // Get webhook base URL - support Railway public domain or fallback to env variable
 const getWebhookBaseUrl = () => {

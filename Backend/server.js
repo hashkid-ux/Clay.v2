@@ -6,9 +6,10 @@ const cors = require('cors');
 const helmet = require('helmet');
 const { createServer } = require('http');
 const WebSocket = require('ws');
-const logger = require('./utils/logger');
-const db = require('./db/postgres');
-const sessionManager = require('./sessions/CallSessionManager');
+const resolve = require('./utils/moduleResolver');
+const logger = require(resolve('utils/logger'));
+const db = require(resolve('db/postgres'));
+const sessionManager = require(resolve('sessions/CallSessionManager'));
 
 const app = express();
 const server = createServer(app);
@@ -45,16 +46,16 @@ app.get('/health', (req, res) => {
 });
 
 // Exotel webhooks
-const exotelRoutes = require('./routes/exotel');
+const exotelRoutes = require(resolve('routes/exotel'));
 app.post('/webhooks/exotel/call-start', exotelRoutes.handleCallStart);
 app.post('/webhooks/exotel/call-end', exotelRoutes.handleCallEnd);
 app.post('/webhooks/exotel/recording', exotelRoutes.handleRecording);
 
 // Dashboard API routes
-app.use('/api/calls', require('./routes/calls'));
-app.use('/api/actions', require('./routes/actions'));
-app.use('/api/analytics', require('./routes/analytics'));
-app.use('/api/clients', require('./routes/clients')); // NEW: Multi-tenancy
+app.use('/api/calls', require(resolve('routes/calls')));
+app.use('/api/actions', require(resolve('routes/actions')));
+app.use('/api/analytics', require(resolve('routes/analytics')));
+app.use('/api/clients', require(resolve('routes/clients'))); // NEW: Multi-tenancy
 
 // WebSocket connection for audio streaming
 wss.on('connection', async (ws, req) => {

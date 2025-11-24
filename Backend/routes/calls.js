@@ -1,8 +1,9 @@
 // routes/calls.js - Calls API endpoints
 const express = require('express');
 const router = express.Router();
-const db = require('../db/postgres');
-const logger = require('../utils/logger');
+const resolve = require('../utils/moduleResolver');
+const db = require(resolve('db/postgres'));
+const logger = require(resolve('utils/logger'));
 
 // GET /api/calls - List all calls
 router.get('/', async (req, res) => {

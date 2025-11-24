@@ -1,7 +1,12 @@
 // realtime/stsSession.js - OpenAI Realtime API (Speech-to-Speech Mode)
 const WebSocket = require('ws');
-const logger = require('../utils/logger');
+const resolve = require('../utils/moduleResolver');
+const logger = require(resolve('utils/logger'));
 const EventEmitter = require('events');
+
+// Reconnection settings
+const MAX_RECONNECT_ATTEMPTS = 3;
+const RECONNECT_DELAY_MS = 1000;
 
 class STSSession extends EventEmitter {
   constructor(apiKey) {
@@ -12,6 +17,11 @@ class STSSession extends EventEmitter {
     this.callId = null;
     this.sessionId = null;
     this.conversationContext = [];
+    this.reconnectAttempts = 0;
+    this.isStopping = false;
+    
+    // Prevent memory leak warnings
+    this.setMaxListeners(15);
   }
 
   /**
@@ -384,7 +394,9 @@ IMPORTANT:
     }
 
     try {
-      this.ws.close();
+      this.isStopping = true;
+      this.removeAllListeners(); // Clean up event listeners
+      this.ws.close(1000, 'Normal closure');
       this.isConnected = false;
       logger.info('STS session stopped', { callId: this.callId });
     } catch (error) {
@@ -392,6 +404,8 @@ IMPORTANT:
         callId: this.callId,
         error: error.message 
       });
+    } finally {
+      this.ws = null;
     }
   }
 
@@ -399,7 +413,7 @@ IMPORTANT:
    * Check if session is active
    */
   isActive() {
-    return this.isConnected;
+    return this.isConnected && !this.isStopping;
   }
 }
 

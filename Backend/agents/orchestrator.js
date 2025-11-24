@@ -1,5 +1,6 @@
 // Backend/agents/orchestrator.js - Complete agent orchestration
-const logger = require('../utils/logger');
+const resolve = require('../utils/moduleResolver');
+const logger = require(resolve('utils/logger'));
 const EventEmitter = require('events');
 
 // Import all agents

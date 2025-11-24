@@ -1,5 +1,6 @@
 // agents/intentDetector.js - Intent detection and entity extraction
-const logger = require('../utils/logger');
+const resolve = require('../utils/moduleResolver');
+const logger = require(resolve('utils/logger'));
 
 class IntentDetector {
   constructor() {

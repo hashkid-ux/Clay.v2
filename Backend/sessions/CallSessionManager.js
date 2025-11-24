@@ -1,10 +1,16 @@
 // sessions/CallSessionManager.js - Main call session orchestrator
-const STSSession = require('../realtime/stsSession');
-const IntentDetector = require('../agents/intentDetector');
-const AgentOrchestrator = require('../agents/orchestrator');
-const logger = require('../utils/logger');
-const db = require('../db/postgres');
+const resolve = require('../utils/moduleResolver');
+const STSSession = require(resolve('realtime/stsSession'));
+const IntentDetector = require(resolve('agents/intentDetector'));
+const AgentOrchestrator = require(resolve('agents/orchestrator'));
+const logger = require(resolve('utils/logger'));
+const db = require(resolve('db/postgres'));
 const EventEmitter = require('events');
+
+// Session timeout (15 minutes of inactivity)
+const SESSION_TIMEOUT_MS = 15 * 60 * 1000;
+// Max conversation history to prevent unbounded memory growth
+const MAX_HISTORY_MESSAGES = 20;
 
 class CallSessionManager extends EventEmitter {
   constructor() {
@@ -12,6 +18,8 @@ class CallSessionManager extends EventEmitter {
     this.sessions = new Map();
     this.intentDetector = new IntentDetector();
     this.agentOrchestrator = AgentOrchestrator;
+    this.sessionTimeouts = new Map(); // Track timeout handles
+    this.setMaxListeners(50); // Prevent memory leak warnings
   }
 
   /**
@@ -36,6 +44,9 @@ class CallSessionManager extends EventEmitter {
         currentIntent: null,
         waitingForEntity: null
       };
+
+      // Setup session timeout (cleanup after inactivity)
+      this.resetSessionTimeout(callId);
 
       // Setup STS event handlers
       this.setupSTSHandlers(session);
@@ -86,12 +97,20 @@ class CallSessionManager extends EventEmitter {
         transcript: data.transcript 
       });
 
-      // Store in conversation history
+      // Store in conversation history (with limit to prevent unbounded growth)
       session.conversationHistory.push({
         role: 'user',
         content: data.transcript,
         timestamp: Date.now()
       });
+
+      // Limit conversation history to prevent memory leaks
+      if (session.conversationHistory.length > MAX_HISTORY_MESSAGES) {
+        session.conversationHistory = session.conversationHistory.slice(-MAX_HISTORY_MESSAGES);
+      }
+
+      // Reset activity timeout
+      this.resetSessionTimeout(callId);
 
       // Save to database
       try {
@@ -346,7 +365,7 @@ class CallSessionManager extends EventEmitter {
   /**
    * End call session
    */
-  async endSession(callId) {
+  async endSession(callId, isTimeout = false) {
     const session = this.sessions.get(callId);
 
     if (!session) {
@@ -355,7 +374,7 @@ class CallSessionManager extends EventEmitter {
     }
 
     try {
-      logger.info('Ending call session', { callId });
+      logger.info('Ending call session', { callId, isTimeout });
 
       session.isActive = false;
 
@@ -363,7 +382,9 @@ class CallSessionManager extends EventEmitter {
       await this.agentOrchestrator.cancelAgent(callId);
 
       // Stop STS session
-      await session.stsSession.stop();
+      if (session.stsSession && typeof session.stsSession.stop === 'function') {
+        await session.stsSession.stop();
+      }
 
       // Save final transcript
       const fullTranscript = session.conversationHistory
@@ -374,6 +395,9 @@ class CallSessionManager extends EventEmitter {
         transcript_full: fullTranscript,
         end_ts: new Date()
       });
+
+      // Clean up session resources
+      this.cleanupSession(session);
 
       // Remove session
       this.sessions.delete(callId);
@@ -388,6 +412,9 @@ class CallSessionManager extends EventEmitter {
         callId,
         error: error.message 
       });
+      // Ensure cleanup happens even on error
+      this.cleanupSession(session);
+      this.sessions.delete(callId);
     }
   }
 
@@ -403,6 +430,57 @@ class CallSessionManager extends EventEmitter {
    */
   getSessionCount() {
     return this.sessions.size;
+  }
+
+  /**
+   * Reset session timeout (30 min inactivity cleanup)
+   */
+  resetSessionTimeout(callId) {
+    // Clear existing timeout if any
+    if (this.sessionTimeouts.has(callId)) {
+      clearTimeout(this.sessionTimeouts.get(callId));
+    }
+
+    // Set new timeout
+    const timeoutHandle = setTimeout(async () => {
+      logger.warn('Session timeout - cleaning up', { callId });
+      await this.endSession(callId, true);
+    }, SESSION_TIMEOUT_MS);
+
+    this.sessionTimeouts.set(callId, timeoutHandle);
+  }
+
+  /**
+   * Clean up all listeners and event handlers
+   */
+  cleanupSession(session) {
+    if (!session) return;
+
+    try {
+      // Stop STS session
+      if (session.stsSession) {
+        session.stsSession.removeAllListeners();
+        if (session.stsSession.ws) {
+          session.stsSession.ws.close();
+        }
+      }
+
+      // Limit conversation history to prevent memory leaks
+      if (session.conversationHistory.length > MAX_HISTORY_MESSAGES) {
+        session.conversationHistory = session.conversationHistory.slice(-MAX_HISTORY_MESSAGES);
+      }
+
+      // Remove session timeout
+      if (this.sessionTimeouts.has(session.callId)) {
+        clearTimeout(this.sessionTimeouts.get(session.callId));
+        this.sessionTimeouts.delete(session.callId);
+      }
+    } catch (error) {
+      logger.error('Error cleaning up session', { 
+        callId: session.callId,
+        error: error.message 
+      });
+    }
   }
 }
 

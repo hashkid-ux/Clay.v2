@@ -1,6 +1,7 @@
 // db/postgres.js - PostgreSQL connection manager
 const { Pool } = require('pg');
-const logger = require('../utils/logger');
+const resolve = require('../utils/moduleResolver');
+const logger = require(resolve('utils/logger'));
 
 // Support both Railway (DATABASE_URL) and local development (individual DB_* vars)
 const getPoolConfig = () => {

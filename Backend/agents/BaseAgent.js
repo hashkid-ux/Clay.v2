@@ -1,6 +1,10 @@
 // agents/BaseAgent.js - Base class for all agents
 const EventEmitter = require('events');
-const logger = require('../utils/logger');
+const resolve = require('../utils/moduleResolver');
+const logger = require(resolve('utils/logger'));
+
+// Agent execution timeout (30 seconds)
+const AGENT_TIMEOUT_MS = 30000;
 
 class BaseAgent extends EventEmitter {
   constructor(callId, initialData = {}) {
@@ -11,6 +15,10 @@ class BaseAgent extends EventEmitter {
     this.requiredFields = []; // Override in subclass
     this.result = null;
     this.isCancelled = false;
+    this.timeoutHandle = null;
+    
+    // Prevent memory leaks from too many listeners
+    this.setMaxListeners(10);
   }
 
   /**
@@ -105,9 +113,39 @@ class BaseAgent extends EventEmitter {
    */
   async continueExecution() {
     try {
+      this.startTimeout();
       await this.execute();
+      this.clearTimeout();
     } catch (error) {
+      this.clearTimeout();
       this.handleError(error);
+  /**
+   * Cancel agent execution
+   */
+  async cancel() {
+    logger.info('Agent cancelled', { 
+      callId: this.callId,
+      agentType: this.constructor.name 
+    });
+    
+    this.isCancelled = true;
+    this.state = 'CANCELLED';
+    this.clearTimeout();
+    this.removeAllListeners(); // Clean up event listeners to prevent memory leaks
+  }       agentType: this.constructor.name
+        });
+        this.handleError(new Error('Agent execution timeout'));
+      }
+    }, AGENT_TIMEOUT_MS);
+  }
+
+  /**
+   * Clear execution timeout
+   */
+  clearTimeout() {
+    if (this.timeoutHandle) {
+      clearTimeout(this.timeoutHandle);
+      this.timeoutHandle = null;
     }
   }
 
@@ -142,8 +180,6 @@ class BaseAgent extends EventEmitter {
     });
 
     this.emit('completed', result);
-  }
-
   /**
    * Handle error
    */
@@ -155,6 +191,10 @@ class BaseAgent extends EventEmitter {
     });
 
     this.state = 'ERROR';
+    this.clearTimeout();
+    this.emit('error', error);
+    this.removeAllListeners(); // Clean up on error
+  } this.state = 'ERROR';
     this.emit('error', error);
   }
 
