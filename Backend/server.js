@@ -55,6 +55,8 @@ app.post('/webhooks/exotel/recording', exotelRoutes.handleRecording);
 app.use('/api/calls', require(resolve('routes/calls')));
 app.use('/api/actions', require(resolve('routes/actions')));
 app.use('/api/analytics', require(resolve('routes/analytics')));
+app.use('/api/analytics', require(resolve('routes/analyticsEnhanced')));
+app.use('/api/calls', require(resolve('routes/livecalls')));
 app.use('/api/clients', require(resolve('routes/clients'))); // NEW: Multi-tenancy
 
 // WebSocket connection for audio streaming
