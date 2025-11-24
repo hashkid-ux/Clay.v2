@@ -1,4 +1,4 @@
-// server.js - Main Caly Server
+// server.js - Main Caly Server (Updated for Multi-tenancy)
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -36,19 +36,25 @@ app.get('/health', (req, res) => {
     status: 'ok', 
     timestamp: new Date().toISOString(),
     service: 'caly-voice-agent',
-    version: '1.0.0'
+    version: '1.0.0',
+    agents: {
+      total: 14,
+      registered: Object.keys(require('./agents/orchestrator').agentRegistry || {}).length
+    }
   });
 });
 
 // Exotel webhooks
-app.post('/webhooks/exotel/call-start', require('./routes/exotel').handleCallStart);
-app.post('/webhooks/exotel/call-end', require('./routes/exotel').handleCallEnd);
-app.post('/webhooks/exotel/recording', require('./routes/exotel').handleRecording);
+const exotelRoutes = require('./routes/exotel');
+app.post('/webhooks/exotel/call-start', exotelRoutes.handleCallStart);
+app.post('/webhooks/exotel/call-end', exotelRoutes.handleCallEnd);
+app.post('/webhooks/exotel/recording', exotelRoutes.handleRecording);
 
 // Dashboard API routes
 app.use('/api/calls', require('./routes/calls'));
 app.use('/api/actions', require('./routes/actions'));
 app.use('/api/analytics', require('./routes/analytics'));
+app.use('/api/clients', require('./routes/clients')); // NEW: Multi-tenancy
 
 // WebSocket connection for audio streaming
 wss.on('connection', async (ws, req) => {
@@ -79,12 +85,8 @@ wss.on('connection', async (ws, req) => {
     // Handle incoming audio chunks from Exotel
     ws.on('message', async (data) => {
       try {
-        // Audio data from Exotel (should be PCM16, 16kHz, mono)
         const audioChunk = Buffer.from(data);
-        
-        // Send to session manager for processing
         sessionManager.processIncomingAudio(callId, audioChunk);
-        
       } catch (error) {
         logger.error('Error processing audio chunk', { 
           callId, 
@@ -97,34 +99,6 @@ wss.on('connection', async (ws, req) => {
     sessionManager.on('audio_output', (data) => {
       if (data.callId === callId && ws.readyState === WebSocket.OPEN) {
         ws.send(data.audioData);
-      }
-    });
-
-    // Handle action requests
-    sessionManager.on('action_requested', async (data) => {
-      if (data.callId === callId) {
-        logger.info('Action requested from LLM', {
-          callId,
-          actionType: data.actionType
-        });
-        
-        // TODO: Execute action via backend executor (Phase 3)
-        // For now, just log it
-        
-        // Example mock result
-        const mockResult = {
-          success: true,
-          data: { status: 'in_transit', eta: '2025-11-24T18:00:00+05:30' }
-        };
-        
-        // Send result back to LLM
-        setTimeout(() => {
-          sessionManager.handleActionResult(
-            callId, 
-            data.callId, 
-            mockResult
-          );
-        }, 500);
       }
     });
 
@@ -194,11 +168,17 @@ server.listen(PORT, HOST, async () => {
   logger.info(`🚀 Caly server running on ${HOST}:${PORT}`);
   logger.info(`📞 Exotel webhooks ready`);
   logger.info(`🎧 WebSocket audio server on ws://${HOST}:${PORT}/audio`);
+  logger.info(`👥 Multi-tenancy enabled - /api/clients`);
+  logger.info(`🤖 14 agents registered and ready`);
   
   // Test database connection
   try {
     await db.testConnection();
     logger.info('✅ Database connection successful');
+    
+    // Log active clients
+    const clients = await db.clients.getActive();
+    logger.info(`✅ Active clients: ${clients.length}`);
   } catch (error) {
     logger.error('❌ Database connection failed', { error: error.message });
   }

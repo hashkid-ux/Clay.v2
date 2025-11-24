@@ -1,11 +1,24 @@
-// agents/orchestrator.js - Agent orchestration system
+// Backend/agents/orchestrator.js - Complete agent orchestration
 const logger = require('../utils/logger');
 const EventEmitter = require('events');
 
 // Import all agents
 const OrderLookupAgent = require('./types/OrderLookupAgent');
 const ReturnAgent = require('./types/ReturnAgent');
-const { RefundAgent, CancelOrderAgent, TrackingAgent, ComplaintAgent } = require('./types/RefundAgent');
+const RefundAgent = require('./types/RefundAgent');
+const CancelOrderAgent = require('./types/CancelOrderAgent');
+const TrackingAgent = require('./types/TrackingAgent');
+const ComplaintAgent = require('./types/ComplaintAgent');
+const ProductInquiryAgent = require('./types/ProductInquiryAgent');
+const PaymentIssueAgent = require('./types/PaymentIssueAgent');
+const AddressChangeAgent = require('./types/AddressChangeAgent');
+const {
+  ExchangeAgent,
+  CODAgent,
+  InvoiceAgent,
+  RegistrationAgent,
+  TechnicalSupportAgent
+} = require('./types/RemainingAgents');
 
 class AgentOrchestrator extends EventEmitter {
   constructor() {
@@ -15,42 +28,49 @@ class AgentOrchestrator extends EventEmitter {
   }
 
   /**
-   * Register all available agents
+   * Register all 14 agents
    */
   registerAgents() {
     return {
+      // Core agents
       OrderLookupAgent,
       ReturnAgent,
       RefundAgent,
       CancelOrderAgent,
       TrackingAgent,
-      ComplaintAgent
-      // Add more as we build them
+      ComplaintAgent,
+      
+      // New agents
+      ProductInquiryAgent,
+      PaymentIssueAgent,
+      AddressChangeAgent,
+      ExchangeAgent,
+      CODAgent,
+      InvoiceAgent,
+      RegistrationAgent,
+      TechnicalSupportAgent
     };
   }
 
   /**
-   * Launch an agent for a call
-   * @param {string} callId - Call identifier
-   * @param {string} agentType - Type of agent to launch
-   * @param {object} initialData - Initial data for agent
+   * Launch agent with optimized execution
    */
   async launchAgent(callId, agentType, initialData = {}) {
     try {
-      // Check if agent already active for this call
+      // Check if agent already active
       if (this.activeAgents.has(callId)) {
         const existing = this.activeAgents.get(callId);
         
-        // If same agent type, update it
+        // If same type, update it
         if (existing.agent.constructor.name === agentType) {
           logger.info('Updating existing agent', { callId, agentType });
           existing.agent.updateData(initialData);
           return existing.agent;
         }
         
-        // If different agent, cancel old one
-        logger.info('Cancelling previous agent, launching new', { 
-          callId, 
+        // Cancel old agent
+        logger.info('Cancelling previous agent', { 
+          callId,
           oldAgent: existing.agent.constructor.name,
           newAgent: agentType 
         });
@@ -77,12 +97,12 @@ class AgentOrchestrator extends EventEmitter {
       });
 
       logger.info('Agent launched', { 
-        callId, 
+        callId,
         agentType,
         initialData 
       });
 
-      // Setup agent event handlers
+      // Setup handlers
       this.setupAgentHandlers(callId, agent);
 
       // Execute agent asynchronously
@@ -106,13 +126,11 @@ class AgentOrchestrator extends EventEmitter {
   setupAgentHandlers(callId, agent) {
     // Agent needs more info
     agent.on('need_info', (data) => {
-      logger.info('Agent needs more info', { 
+      logger.info('Agent needs info', { 
         callId,
-        needed: data.field,
-        prompt: data.prompt 
+        needed: data.field 
       });
       
-      // Emit to session manager to update AI context
       this.emit('agent_needs_info', {
         callId,
         field: data.field,
@@ -122,23 +140,24 @@ class AgentOrchestrator extends EventEmitter {
 
     // Agent completed
     agent.on('completed', (result) => {
+      const agentData = this.activeAgents.get(callId);
+      const duration = agentData ? Date.now() - agentData.startTime : 0;
+      
       logger.info('Agent completed', { 
         callId,
         agentType: agent.constructor.name,
-        duration: Date.now() - this.activeAgents.get(callId).startTime
+        duration 
       });
 
-      // Update state
-      const agentData = this.activeAgents.get(callId);
       if (agentData) {
         agentData.state = 'COMPLETED';
       }
 
-      // Emit result
       this.emit('agent_completed', {
         callId,
         agentType: agent.constructor.name,
-        result
+        result,
+        duration
       });
     });
 
@@ -150,13 +169,11 @@ class AgentOrchestrator extends EventEmitter {
         error: error.message 
       });
 
-      // Update state
       const agentData = this.activeAgents.get(callId);
       if (agentData) {
         agentData.state = 'ERROR';
       }
 
-      // Emit error
       this.emit('agent_error', {
         callId,
         agentType: agent.constructor.name,
@@ -170,24 +187,18 @@ class AgentOrchestrator extends EventEmitter {
    */
   async executeAgent(callId, agent) {
     try {
-      // Agent runs in background
       await agent.execute();
-      
     } catch (error) {
       logger.error('Agent execution failed', { 
         callId,
         error: error.message 
       });
-      
-      // Emit error event
       agent.emit('error', error);
     }
   }
 
   /**
-   * Update agent with new data (e.g., user provided order_id)
-   * @param {string} callId - Call identifier
-   * @param {object} data - New data to provide to agent
+   * Update agent with new data
    */
   updateAgent(callId, data) {
     const agentData = this.activeAgents.get(callId);
@@ -197,23 +208,18 @@ class AgentOrchestrator extends EventEmitter {
       return false;
     }
 
-    const agent = agentData.agent;
-
-    logger.info('Updating agent with new data', { 
+    logger.info('Updating agent', { 
       callId,
-      agentType: agent.constructor.name,
+      agentType: agentData.agent.constructor.name,
       data 
     });
 
-    // Pass data to agent
-    agent.updateData(data);
-
+    agentData.agent.updateData(data);
     return true;
   }
 
   /**
-   * Cancel active agent for a call
-   * @param {string} callId - Call identifier
+   * Cancel active agent
    */
   async cancelAgent(callId) {
     const agentData = this.activeAgents.get(callId);
@@ -223,29 +229,21 @@ class AgentOrchestrator extends EventEmitter {
       return;
     }
 
-    const agent = agentData.agent;
-
     logger.info('Cancelling agent', { 
       callId,
-      agentType: agent.constructor.name 
+      agentType: agentData.agent.constructor.name 
     });
 
     try {
-      // Call agent's cancel method
-      await agent.cancel();
-      
-      // Update state
+      await agentData.agent.cancel();
       agentData.state = 'CANCELLED';
 
-      // Emit event
       this.emit('agent_cancelled', {
         callId,
-        agentType: agent.constructor.name
+        agentType: agentData.agent.constructor.name
       });
 
-      // Remove from active agents
       this.activeAgents.delete(callId);
-
     } catch (error) {
       logger.error('Error cancelling agent', { 
         callId,
@@ -255,7 +253,7 @@ class AgentOrchestrator extends EventEmitter {
   }
 
   /**
-   * Get active agent for a call
+   * Get active agent
    */
   getAgent(callId) {
     const agentData = this.activeAgents.get(callId);
@@ -276,7 +274,7 @@ class AgentOrchestrator extends EventEmitter {
   }
 
   /**
-   * Check if agent is active for call
+   * Check if agent is active
    */
   hasActiveAgent(callId) {
     return this.activeAgents.has(callId);
@@ -299,7 +297,28 @@ class AgentOrchestrator extends EventEmitter {
   }
 
   /**
-   * Cleanup completed agents (call this periodically)
+   * Get agent statistics
+   */
+  getAgentStats() {
+    const stats = {
+      totalActive: this.activeAgents.size,
+      byType: {},
+      byState: {}
+    };
+
+    for (const agentData of this.activeAgents.values()) {
+      // Count by type
+      stats.byType[agentData.agentType] = (stats.byType[agentData.agentType] || 0) + 1;
+      
+      // Count by state
+      stats.byState[agentData.state] = (stats.byState[agentData.state] || 0) + 1;
+    }
+
+    return stats;
+  }
+
+  /**
+   * Cleanup completed agents
    */
   cleanup() {
     const now = Date.now();
