@@ -12,7 +12,7 @@ const helmet = require('helmet');
 const { createServer } = require('http');
 const WebSocket = require('ws');
 const resolve = require('./utils/moduleResolver');
-const logger = require(resolve('utils/logger'));
+const logger = require(resolve('./utils/logger'));
 const db = require(resolve('db/postgres'));
 const sessionManager = require(resolve('sessions/CallSessionManager'));
 const GracefulShutdown = require(resolve('utils/gracefulShutdown'));
@@ -61,9 +61,6 @@ app.use(bodyParser.raw({ type: 'audio/wav', limit: '10mb' }));
 
 // Request ID (must be early for correlation)
 app.use(requestIdMiddleware);
-
-// Request context (must be after requestId)
-app.use(requestContextMiddleware);
 
 // HTTPS redirect and security headers (Phase 2)
 app.use(httpsRedirect);
