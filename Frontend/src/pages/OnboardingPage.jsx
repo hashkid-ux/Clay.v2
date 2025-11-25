@@ -7,7 +7,7 @@ import {
   ChevronRight, Key, DollarSign, Clock
 } from 'lucide-react';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
 const OnboardingPage = () => {
   const navigate = useNavigate();

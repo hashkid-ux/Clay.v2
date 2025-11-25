@@ -294,7 +294,15 @@ const batchQuery = async (pool, queries) => {
   }
 };
 
+
+
+// Create default pool instance for session storage and general use
+const pool = createConnectionPool();
+
 module.exports = {
+  // Pool instance
+  pool,
+
   // Pool creation
   createConnectionPool,
 

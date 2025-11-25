@@ -7,18 +7,7 @@ const JWTUtils = require('../auth/jwtUtils');
 const PasswordUtils = require('../auth/passwordUtils');
 const { authMiddleware } = require('../auth/authMiddleware');
 const { v4: uuidv4 } = require('uuid');
-const nodemailer = require('nodemailer');
-
-// Email configuration (use your SMTP provider)
-const emailTransporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: process.env.SMTP_PORT || 587,
-  secure: process.env.SMTP_SECURE === 'true',
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS
-  }
-});
+const emailService = require('../utils/email');
 
 /**
  * POST /api/auth/register - Register a new company with admin user
@@ -82,20 +71,18 @@ router.post('/register', async (req, res) => {
 
     // Send verification email with OTP
     try {
-      await emailTransporter.sendMail({
-        from: process.env.SMTP_FROM || 'noreply@caly.com',
-        to: email,
-        subject: 'Verify your Caly account - ' + otp,
-        html: `
-          <h2>Welcome to Caly, ${firstName}!</h2>
-          <p>Your OTP for email verification is: <strong>${otp}</strong></p>
-          <p>This OTP will expire in 10 minutes.</p>
-          <p>If you didn't register for Caly, please ignore this email.</p>
-        `
-      });
-      logger.info('Verification email sent', { email });
+      const emailResult = await emailService.sendOTPEmail(email, otp);
+      if (!emailResult.success) {
+        logger.warn('Failed to send verification email', {
+          email,
+          error: emailResult.error,
+        });
+      }
     } catch (emailError) {
-      logger.error('Error sending verification email', { email, error: emailError.message });
+      logger.error('Error sending verification email', {
+        email,
+        error: emailError.message,
+      });
       // Continue anyway - user can request resend
     }
 
@@ -220,12 +207,6 @@ router.post('/login', async (req, res) => {
     if (!user.is_active) {
       logger.warn('Login attempt - user inactive', { email, ip: req.ip });
       return res.status(401).json({ error: 'Account is inactive' });
-    }
-
-    // Check if email verified
-    if (!user.is_verified) {
-      logger.warn('Login attempt - email not verified', { email });
-      return res.status(401).json({ error: 'Please verify your email first' });
     }
 
     // Verify password
@@ -410,16 +391,13 @@ router.post('/request-otp', async (req, res) => {
 
     // Send email
     try {
-      await emailTransporter.sendMail({
-        from: process.env.SMTP_FROM || 'noreply@caly.com',
-        to: email,
-        subject: 'Your Caly OTP - ' + otp,
-        html: `
-          <h2>OTP for Email Verification</h2>
-          <p>Your OTP is: <strong>${otp}</strong></p>
-          <p>This OTP will expire in 10 minutes.</p>
-        `
-      });
+      const emailResult = await emailService.sendOTPEmail(email, otp);
+      if (!emailResult.success) {
+        logger.warn('Failed to send OTP email', {
+          email,
+          error: emailResult.error,
+        });
+      }
     } catch (emailError) {
       logger.error('Error sending OTP email', { error: emailError.message });
     }

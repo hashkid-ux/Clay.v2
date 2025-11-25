@@ -1,17 +1,39 @@
-// Frontend/src/pages/LoginPage.jsx - Company login page
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Mail, Lock, AlertCircle, Loader } from 'lucide-react';
+// Frontend/src/pages/LoginPage.jsx - Company login page with OAuth
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Mail, Lock, AlertCircle, Loader, Chrome } from 'lucide-react';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
 const LoginPage = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
+
+  // Check for OAuth token in URL (from callback)
+  useEffect(() => {
+    const token = searchParams.get('token');
+    const oauthError = searchParams.get('error');
+
+    if (token) {
+      // Save token and redirect
+      localStorage.setItem('accessToken', token);
+      navigate('/dashboard');
+    }
+
+    if (oauthError) {
+      setError(`OAuth Error: ${oauthError}`);
+    }
+  }, [searchParams, navigate]);
+
+  const handleGoogleLogin = () => {
+    // Redirect to backend OAuth endpoint
+    window.location.href = `${API_BASE_URL}/api/oauth/google`;
+  };
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -70,6 +92,27 @@ const LoginPage = () => {
             <span className="text-red-800 text-sm">{error}</span>
           </div>
         )}
+
+        {/* Google OAuth Button */}
+        <button
+          onClick={handleGoogleLogin}
+          type="button"
+          className="w-full mb-6 flex items-center justify-center gap-3 bg-white border-2 border-gray-300 hover:bg-gray-50 hover:border-blue-400 text-gray-700 font-semibold py-3 px-4 rounded-lg transition-all duration-200"
+          disabled={loading}
+        >
+          <Chrome className="w-5 h-5" />
+          Sign in with Google
+        </button>
+
+        {/* Divider */}
+        <div className="relative mb-6">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-gray-300"></div>
+          </div>
+          <div className="relative flex justify-center text-sm">
+            <span className="px-2 bg-white text-gray-500">Or continue with email</span>
+          </div>
+        </div>
 
         {/* Login Form */}
         <form onSubmit={handleLogin} className="space-y-4">

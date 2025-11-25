@@ -5,7 +5,7 @@ import {
 } from 'recharts';
 import { TrendingUp, AlertCircle, CheckCircle, DollarSign, Zap, Clock, Users } from 'lucide-react';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
 // Cost calculation helper
 const calculateCostSavings = (callCount, automationRate) => {

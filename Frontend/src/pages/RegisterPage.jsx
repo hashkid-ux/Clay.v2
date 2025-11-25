@@ -1,17 +1,33 @@
-// Frontend/src/pages/RegisterPage.jsx - Company registration page
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Mail, Lock, User, Building, AlertCircle, CheckCircle, Loader, Eye, EyeOff } from 'lucide-react';
+// Frontend/src/pages/RegisterPage.jsx - Company registration page with OAuth
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Mail, Lock, User, Building, AlertCircle, CheckCircle, Loader, Eye, EyeOff, Chrome } from 'lucide-react';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
 const RegisterPage = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [step, setStep] = useState(1); // 1: signup info, 2: email verification
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [passwordStrength, setPasswordStrength] = useState(0);
+
+  // Check for OAuth token in URL
+  useEffect(() => {
+    const token = searchParams.get('token');
+    const oauthError = searchParams.get('error');
+
+    if (token) {
+      localStorage.setItem('accessToken', token);
+      navigate('/dashboard');
+    }
+
+    if (oauthError) {
+      setError(`OAuth Error: ${oauthError}`);
+    }
+  }, [searchParams, navigate]);
 
   // Step 1: Registration Info
   const [formData, setFormData] = useState({
@@ -37,6 +53,11 @@ const RegisterPage = () => {
     if (/[0-9]/.test(pwd)) strength += 25;
     if (/[!@#$%^&*]/.test(pwd)) strength = 100;
     setPasswordStrength(strength);
+  };
+
+  const handleGoogleSignup = () => {
+    // Redirect to Google OAuth
+    window.location.href = `${API_BASE_URL}/api/oauth/google`;
   };
 
   const handleInputChange = (e) => {
@@ -177,6 +198,31 @@ const RegisterPage = () => {
             {step === 1 ? 'Create Your Account' : 'Verify Your Email'}
           </p>
         </div>
+
+        {/* Google OAuth Button - Only on Step 1 */}
+        {step === 1 && (
+          <>
+            <button
+              onClick={handleGoogleSignup}
+              type="button"
+              className="w-full mb-4 flex items-center justify-center gap-3 bg-white border-2 border-gray-300 hover:bg-gray-50 hover:border-blue-400 text-gray-700 font-semibold py-3 px-4 rounded-lg transition-all duration-200"
+              disabled={loading}
+            >
+              <Chrome className="w-5 h-5" />
+              Sign up with Google
+            </button>
+
+            {/* Divider */}
+            <div className="relative mb-6">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-gray-300"></div>
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-2 bg-white text-gray-500">Or register with email</span>
+              </div>
+            </div>
+          </>
+        )}
 
         {/* Step Indicator */}
         <div className="flex gap-4 mb-8">

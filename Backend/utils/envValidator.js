@@ -23,9 +23,11 @@ class EnvValidator {
       EXOTEL_SID: { required: false },
       EXOTEL_TOKEN: { required: false },
       SHOPIFY_API_KEY: { required: false },
-      WASABI_KEY: { required: false },
-      WASABI_SECRET: { required: false },
-      WASABI_BUCKET: { required: false },
+      WASABI_ACCESS_KEY_ID: { required: false },
+      WASABI_SECRET_ACCESS_KEY: { required: false },
+      WASABI_BUCKET_NAME: { required: false },
+      WASABI_REGION: { required: false, default: 'us-west-1' },
+      WASABI_ENDPOINT: { required: false, default: 'https://s3.us-west-1.wasabisys.com' },
       SENTRY_DSN: { required: false },
     };
 

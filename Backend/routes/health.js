@@ -84,11 +84,6 @@ const checkEnvironment = async () => {
     'DATABASE_URL',
     'JWT_SECRET',
     'OPENAI_API_KEY',
-    'WASABI_ENDPOINT',
-    'WASABI_REGION',
-    'WASABI_ACCESS_KEY',
-    'WASABI_SECRET_KEY',
-    'WASABI_BUCKET',
     'ENCRYPTION_KEY',
   ];
 

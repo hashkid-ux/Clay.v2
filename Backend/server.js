@@ -1,4 +1,4 @@
-// server.js - Main Caly Server (Updated for Multi-tenancy)
+// server.js - Main Caly Server (Updated for Multi-tenancy + OAuth2 + Safe DB Init)
 require('dotenv').config();
 
 // CRITICAL: Validate environment variables BEFORE anything else
@@ -11,13 +11,90 @@ const cors = require('cors');
 const helmet = require('helmet');
 const { createServer } = require('http');
 const WebSocket = require('ws');
+const passport = require('passport');
+const session = require('express-session');
+const pgSession = require('connect-pg-simple')(session);
+const fs = require('fs');
+const path = require('path');
 const resolve = require('./utils/moduleResolver');
 const logger = require(resolve('./utils/logger'));
 const db = require(resolve('db/postgres'));
+const pool = require(resolve('db/pooling')).pool;
 const sessionManager = require(resolve('sessions/CallSessionManager'));
 const GracefulShutdown = require(resolve('utils/gracefulShutdown'));
 const requestIdMiddleware = require(resolve('middleware/requestId'));
 const setupSwagger = require(resolve('docs/swagger'));
+
+// Load Passport strategies
+require('./config/passport-google');
+
+/**
+ * 🔒 AUTO-INITIALIZE DATABASE SAFELY
+ * ✅ Creates tables if they don't exist
+ * ✅ No data loss (idempotent)
+ * ✅ Handles errors gracefully
+ * ✅ Automatic on every app start
+ */
+async function initializeDatabase() {
+  try {
+    logger.info('📄 Starting database initialization...');
+
+    // Step 1: Test connection
+    logger.info('🔗 Testing database connection...');
+    await db.query('SELECT NOW()');
+    logger.info('✅ Database connection established');
+
+    // Step 2: Read schema file
+    const schemaPath = path.join(__dirname, 'db/schema.sql');
+    if (!fs.existsSync(schemaPath)) {
+      logger.warn('⚠️  schema.sql not found at ' + schemaPath);
+      return;
+    }
+
+    const schema = fs.readFileSync(schemaPath, 'utf8');
+
+    // Step 3: Execute schema statements one by one (idempotent)
+    const statements = schema
+      .split(';')
+      .map(s => s.trim())
+      .filter(s => s && !s.startsWith('--') && !s.startsWith('/*'));
+
+    let successCount = 0;
+    let skipCount = 0;
+
+    for (const statement of statements) {
+      if (!statement) continue;
+
+      try {
+        await db.query(statement);
+        successCount++;
+      } catch (error) {
+        // Ignore "already exists" errors - expected during init
+        if (
+          error.message.includes('already exists') ||
+          error.message.includes('does not exist') ||
+          error.code === '42P07' || // TABLE_ALREADY_EXISTS
+          error.code === '42701'    // COLUMN_ALREADY_EXISTS
+        ) {
+          skipCount++;
+          logger.debug('⏭️  ' + error.message.split('\n')[0]);
+        } else {
+          // Log but don't crash on minor errors
+          logger.warn('⚠️  Schema execution warning: ' + error.message.split('\n')[0]);
+        }
+      }
+    }
+
+    logger.info(`✅ Database initialization complete (${successCount} executed, ${skipCount} skipped)`);
+    return true;
+  } catch (error) {
+    logger.error('❌ Database initialization failed', {
+      error: error.message,
+      code: error.code,
+    });
+    throw error;
+  }
+}
 
 // Import middleware services
 const auditLogger = require(resolve('services/auditLogger'));
@@ -53,6 +130,31 @@ const {
 // Middleware
 app.use(helmet());
 app.use(cors());
+
+// ✅ Production Session Storage - PostgreSQL (replaces MemoryStore)
+app.use(
+  session({
+    store: new pgSession({
+      pool: pool,
+      tableName: 'session', // PostgreSQL will create this table automatically
+      ttl: 24 * 60 * 60, // 24 hours in seconds
+    }),
+    secret: process.env.SESSION_SECRET || 'caly-oauth-session-secret-key',
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+      httpOnly: true,
+      sameSite: 'lax',
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours in milliseconds
+    },
+  })
+);
+logger.info('✅ Session store configured (PostgreSQL - production-ready)');
+
+// Passport initialization
+app.use(passport.initialize());
+app.use(passport.session());
 
 // Request size limits (security)
 app.use(bodyParser.json({ limit: '1mb' }));
@@ -94,6 +196,13 @@ setupSwagger(app);
 
 // Health check routes
 app.use('/health', require(resolve('routes/health')));
+
+// Test/debug routes (for development and testing)
+app.use('/api/test', require(resolve('routes/test')));
+
+// OAuth routes (public - for Google authentication)
+// IMPORTANT: Registered at /api/auth not /api/oauth because Google redirects to /api/auth/google/callback
+app.use('/api/auth', require(resolve('routes/oauth')));
 
 // Legacy health endpoint for backward compatibility
 app.get('/health-legacy', (req, res) => {
@@ -304,38 +413,78 @@ const gracefulShutdown = async () => {
 process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
 
-// Start server
-const PORT = process.env.PORT || 3000;
-const HOST = process.env.HOST || '0.0.0.0';
-
-server.listen(PORT, HOST, async () => {
-  logger.info(`🚀 Caly server running on ${HOST}:${PORT}`);
-  logger.info(`📞 Exotel webhooks ready`);
-  logger.info(`🎧 WebSocket audio server on ws://${HOST}:${PORT}/audio`);
-  logger.info(`👥 Multi-tenancy enabled - /api/clients`);
-  logger.info(`🤖 14 agents registered and ready`);
-  
-  // Setup graceful shutdown handlers
-  const shutdown = new GracefulShutdown(server, db, null);
-  shutdown.attachHandlers();
-  
-  // Track active requests for graceful shutdown
-  app.use((req, res, next) => {
-    shutdown.trackRequest(req, res);
-    next();
-  });
-  
-  // Test database connection
+/**
+ * 🚀 START APPLICATION
+ * 1. Initialize database (creates tables if needed)
+ * 2. Setup graceful shutdown
+ * 3. Start HTTP + WebSocket server
+ * 4. Test connections
+ */
+async function startApplication() {
   try {
-    await db.testConnection();
-    logger.info('✅ Database connection successful');
-    
-    // Log active clients
-    const clients = await db.clients.getActive();
-    logger.info(`✅ Active clients: ${clients.length}`);
+    // Step 1: Initialize database (must be first!)
+    logger.info('🚀 Starting Caly Voice Agent...');
+    await initializeDatabase();
+
+    // Step 2: Setup graceful shutdown handlers
+    const shutdown = new GracefulShutdown(server, db, null);
+    shutdown.attachHandlers();
+
+    // Step 3: Start server
+    const PORT = process.env.PORT || 3000;
+    const HOST = process.env.HOST || '0.0.0.0';
+
+    server.listen(PORT, HOST, async () => {
+      logger.info(`✅ 🚀 Caly server running on ${HOST}:${PORT}`);
+      logger.info(`✅ 📞 Exotel webhooks ready`);
+      logger.info(`✅ 🎧 WebSocket audio server on ws://${HOST}:${PORT}/audio`);
+      logger.info(`✅ 👥 Multi-tenancy enabled - /api/clients`);
+      logger.info(`✅ 🤖 14 agents registered and ready`);
+
+      // Step 4: Test database connection
+      try {
+        await db.testConnection();
+        logger.info('✅ Database connection verified');
+
+        // Log active clients
+        const clients = await db.clients.getActive();
+        logger.info(`✅ Active clients: ${clients.length}`);
+      } catch (error) {
+        logger.error('❌ Database connection verification failed', {
+          error: error.message,
+        });
+      }
+
+      logger.info('🎉 Application ready to handle requests');
+    });
+
+    // Handle server errors
+    server.on('error', (error) => {
+      logger.error('❌ Server error', { error: error.message });
+      process.exit(1);
+    });
   } catch (error) {
-    logger.error('❌ Database connection failed', { error: error.message });
+    logger.error('❌ Failed to start application', {
+      error: error.message,
+      stack: error.stack,
+    });
+    process.exit(1);
   }
+}
+
+// Start the application
+startApplication();
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  logger.error('❌ Uncaught exception', { error: error.message, stack: error.stack });
+  process.exit(1);
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('❌ Unhandled rejection', { reason: String(reason) });
+  process.exit(1);
 });
 
 module.exports = { app, server, wss };
