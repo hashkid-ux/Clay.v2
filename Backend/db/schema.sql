@@ -46,6 +46,26 @@ CREATE TABLE clients (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Users table: User accounts with passwords (one-to-many with clients)
+CREATE TABLE users (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name VARCHAR(255) NOT NULL,
+  email VARCHAR(255) UNIQUE NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  role VARCHAR(50) DEFAULT 'user',
+  otp_code VARCHAR(6),
+  otp_expires_at TIMESTAMP WITH TIME ZONE,
+  is_active BOOLEAN DEFAULT true,
+  last_login TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_client_id ON users(client_id);
+CREATE INDEX idx_users_created_at ON users(created_at);
+
 -- Calls table: Main call records (per client)
 CREATE TABLE calls (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

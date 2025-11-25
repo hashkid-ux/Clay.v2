@@ -46,7 +46,7 @@ router.post('/register', async (req, res) => {
     }
 
     // Check if email already exists
-    const existingUser = await db.query('SELECT id FROM company_users WHERE email = $1', [email]);
+    const existingUser = await db.query('SELECT id FROM users WHERE email = $1', [email]);
     if (existingUser.rows.length > 0) {
       return res.status(409).json({ error: 'Email already registered' });
     }
@@ -71,11 +71,11 @@ router.post('/register', async (req, res) => {
     const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
     const userResult = await db.query(
-      `INSERT INTO company_users 
-       (id, client_id, email, password_hash, first_name, last_name, role, otp_code, otp_expires_at, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6, 'admin', $7, $8, true)
-       RETURNING id, email, first_name, last_name, client_id`,
-      [userId, clientId, email, passwordHash, firstName || '', lastName || '', otp, otpExpiresAt]
+      `INSERT INTO users 
+       (id, client_id, email, password_hash, name, role, otp_code, otp_expires_at, is_active)
+       VALUES ($1, $2, $3, $4, $5, 'admin', $6, $7, true)
+       RETURNING id, email, name, client_id`,
+      [userId, clientId, email, passwordHash, (firstName + ' ' + lastName).trim() || 'Admin User', otp, otpExpiresAt]
     );
 
     const user = userResult.rows[0];
@@ -140,7 +140,7 @@ router.post('/verify-email', async (req, res) => {
 
     // Find user
     const userResult = await db.query(
-      'SELECT id, client_id, otp_code, otp_expires_at FROM company_users WHERE email = $1',
+      'SELECT id, client_id, otp_code, otp_expires_at FROM users WHERE email = $1',
       [email]
     );
 
@@ -161,8 +161,8 @@ router.post('/verify-email', async (req, res) => {
 
     // Mark as verified
     await db.query(
-      `UPDATE company_users 
-       SET is_verified = true, email_verified_at = NOW(), otp_code = NULL, otp_expires_at = NULL
+      `UPDATE users 
+       SET is_active = true, otp_code = NULL, otp_expires_at = NULL
        WHERE id = $1`,
       [user.id]
     );
@@ -200,12 +200,12 @@ router.post('/login', async (req, res) => {
 
     // Find user
     const userResult = await db.query(
-      `SELECT cu.id, cu.email, cu.password_hash, cu.first_name, cu.last_name, 
-              cu.client_id, cu.role, cu.is_verified, cu.is_active,
+      `SELECT u.id, u.email, u.password_hash, u.name, 
+              u.client_id, u.role, u.is_active,
               c.name as company_name
-       FROM company_users cu
-       JOIN clients c ON cu.client_id = c.id
-       WHERE cu.email = $1`,
+       FROM users u
+       JOIN clients c ON u.client_id = c.id
+       WHERE u.email = $1`,
       [email]
     );
 
@@ -248,7 +248,7 @@ router.post('/login', async (req, res) => {
 
     // Update last login
     await db.query(
-      'UPDATE company_users SET last_login = NOW() WHERE id = $1',
+      'UPDATE users SET last_login = NOW() WHERE id = $1',
       [user.id]
     );
 
@@ -345,11 +345,11 @@ router.post('/logout', authMiddleware, async (req, res) => {
 router.get('/me', authMiddleware, async (req, res) => {
   try {
     const userResult = await db.query(
-      `SELECT cu.id, cu.email, cu.first_name, cu.last_name, cu.client_id, cu.role,
+      `SELECT u.id, u.email, u.name, u.client_id, u.role,
               c.name as company_name, c.active as company_active
-       FROM company_users cu
-       JOIN clients c ON cu.client_id = c.id
-       WHERE cu.id = $1`,
+       FROM users u
+       JOIN clients c ON u.client_id = c.id
+       WHERE u.id = $1`,
       [req.user.id]
     );
 
@@ -363,8 +363,7 @@ router.get('/me', authMiddleware, async (req, res) => {
       user: {
         id: user.id,
         email: user.email,
-        firstName: user.first_name,
-        lastName: user.last_name,
+        name: user.name,
         clientId: user.client_id,
         companyName: user.company_name,
         companyActive: user.company_active,
@@ -391,7 +390,7 @@ router.post('/request-otp', async (req, res) => {
     }
 
     const userResult = await db.query(
-      'SELECT id FROM company_users WHERE email = $1',
+      'SELECT id FROM users WHERE email = $1',
       [email]
     );
 
@@ -405,7 +404,7 @@ router.post('/request-otp', async (req, res) => {
 
     // Update OTP in database
     await db.query(
-      'UPDATE company_users SET otp_code = $1, otp_expires_at = $2 WHERE id = $3',
+      'UPDATE users SET otp_code = $1, otp_expires_at = $2 WHERE id = $3',
       [otp, otpExpiresAt, userId]
     );
 
