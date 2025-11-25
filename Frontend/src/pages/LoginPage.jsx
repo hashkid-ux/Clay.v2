@@ -32,7 +32,7 @@ const LoginPage = () => {
 
   const handleGoogleLogin = () => {
     // Redirect to backend OAuth endpoint
-    window.location.href = `${API_BASE_URL}/api/oauth/google`;
+    window.location.href = `${API_BASE_URL}/api/auth/google`;
   };
 
   const handleLogin = async (e) => {

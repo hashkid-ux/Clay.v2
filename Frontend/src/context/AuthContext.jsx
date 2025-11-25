@@ -30,7 +30,7 @@ export const AuthProvider = ({ children }) => {
 
   const fetchUserProfile = useCallback(async (accessToken) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/oauth/profile`, {
+      const response = await fetch(`${API_BASE_URL}/api/auth/profile`, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
 
@@ -154,7 +154,7 @@ export const AuthProvider = ({ children }) => {
       // Try to logout on backend
       const accessToken = localStorage.getItem('accessToken');
       if (accessToken) {
-        await fetch(`${API_BASE_URL}/api/oauth/logout`, {
+        await fetch(`${API_BASE_URL}/api/auth/logout`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${accessToken}` }
         }).catch(() => {
@@ -179,7 +179,7 @@ export const AuthProvider = ({ children }) => {
 
   const verifyToken = useCallback(async (accessToken) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/oauth/verify-token`, {
+      const response = await fetch(`${API_BASE_URL}/api/auth/verify-token`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token: accessToken })
