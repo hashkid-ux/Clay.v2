@@ -62,14 +62,18 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    const userClientId = req.user.client_id;
 
+    // CRITICAL: Verify action belongs to user's company
     const result = await db.query(
-      'SELECT * FROM actions WHERE id = $1',
-      [id]
+      `SELECT a.* FROM actions a
+       JOIN calls c ON a.call_id = c.id
+       WHERE a.id = $1 AND c.client_id = $2`,
+      [id, userClientId]
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Action not found' });
+      return res.status(404).json({ error: 'Action not found or access denied' });
     }
 
     res.json({ action: result.rows[0] });
@@ -86,7 +90,8 @@ router.get('/:id', async (req, res) => {
 // GET /api/actions/stats - Get action statistics
 router.get('/stats/summary', async (req, res) => {
   try {
-    const { client_id, start_date, end_date } = req.query;
+    const userClientId = req.user.client_id;  // Use authenticated user's company
+    const { start_date, end_date } = req.query;
 
     let query = `
       SELECT 
@@ -96,16 +101,10 @@ router.get('/stats/summary', async (req, res) => {
         AVG(EXTRACT(EPOCH FROM (updated_at - created_at))) as avg_duration_seconds
       FROM actions a
       JOIN calls c ON a.call_id = c.id
-      WHERE 1=1
+      WHERE c.client_id = $1
     `;
-    const params = [];
-    let paramIndex = 1;
-
-    if (client_id) {
-      query += ` AND c.client_id = $${paramIndex}`;
-      params.push(client_id);
-      paramIndex++;
-    }
+    const params = [userClientId];
+    let paramIndex = 2;
 
     if (start_date) {
       query += ` AND a.created_at >= $${paramIndex}`;
