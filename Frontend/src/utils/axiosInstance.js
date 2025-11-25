@@ -1,7 +1,7 @@
 // Frontend/src/utils/axiosInstance.js - Configured axios with auth headers
 import axios from 'axios';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
 const axiosInstance = axios.create({
   baseURL: API_BASE_URL,

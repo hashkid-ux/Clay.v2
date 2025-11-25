@@ -32,7 +32,7 @@ const options = {
     },
     servers: [
       {
-        url: process.env.API_URL || 'http://localhost:8080',
+        url: process.env.API_URL || `http://localhost:${process.env.PORT || 8080}`,
         description: 'Development Server',
       },
       {

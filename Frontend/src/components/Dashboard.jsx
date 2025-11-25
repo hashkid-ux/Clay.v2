@@ -12,8 +12,6 @@ import {
 } from 'lucide-react';
 import axiosInstance from '../utils/axiosInstance';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
-
 const Dashboard = () => {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
@@ -34,8 +32,8 @@ const Dashboard = () => {
     try {
       setError('');
       const [statsRes, callsRes] = await Promise.all([
-        axiosInstance.get(`${API_BASE_URL}/api/analytics/dashboard`),
-        axiosInstance.get(`${API_BASE_URL}/api/calls?limit=30&offset=0`)
+        axiosInstance.get('/api/analytics/dashboard'),
+        axiosInstance.get('/api/calls?limit=30&offset=0')
       ]);
 
       if (statsRes.data) {

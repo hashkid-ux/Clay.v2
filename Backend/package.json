@@ -44,6 +44,8 @@
     "redis": "^4.6.11",
     "aws-sdk": "^2.1450.0",
     "openai": "^4.20.0",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.0",
     "lru-cache": "^10.1.0",
     "jsonwebtoken": "^9.0.2",
     "bcrypt": "^5.1.1",

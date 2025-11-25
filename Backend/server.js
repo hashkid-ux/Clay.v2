@@ -19,6 +19,15 @@ const GracefulShutdown = require(resolve('utils/gracefulShutdown'));
 const requestIdMiddleware = require(resolve('middleware/requestId'));
 const setupSwagger = require(resolve('docs/swagger'));
 
+// Import middleware services
+const auditLogger = require(resolve('services/auditLogger'));
+const { errorHandler, NotFoundError } = require(resolve('middleware/errorHandler'));
+const {
+  loginRateLimiter,
+  webhookRateLimiter,
+  apiRateLimiter
+} = require(resolve('middleware/rateLimiter'));
+
 const app = express();
 const server = createServer(app);
 const wss = new WebSocket.Server({ server, path: '/audio' });

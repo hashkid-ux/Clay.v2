@@ -437,4 +437,39 @@ router.post('/request-otp', async (req, res) => {
   }
 });
 
+/**
+ * POST /api/auth/refresh - Refresh JWT token
+ * Body: { refreshToken }
+ */
+router.post('/refresh', async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+      return res.status(400).json({ error: 'Refresh token required' });
+    }
+
+    // Verify refresh token
+    const decoded = JWTUtils.verifyToken(refreshToken);
+
+    // Issue new access token
+    const newToken = JWTUtils.generateToken({
+      userId: decoded.userId,
+      email: decoded.email,
+      client_id: decoded.client_id,
+      role: decoded.role,
+      companyName: decoded.companyName
+    });
+
+    res.json({
+      token: newToken,
+      expiresIn: '24h'
+    });
+
+  } catch (error) {
+    logger.error('Error refreshing token', { error: error.message });
+    res.status(401).json({ error: 'Invalid refresh token' });
+  }
+});
+
 module.exports = router;

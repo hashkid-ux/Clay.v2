@@ -95,7 +95,9 @@ router.get('/:id', async (req, res) => {
 
     // Get extracted entities
     const entities = await db.query(
-      'SELECT * FROM entities WHERE call_id = $1 AND client_id = $2',
+      `SELECT e.* FROM entities e
+       JOIN calls c ON e.call_id = c.id
+       WHERE e.call_id = $1 AND c.client_id = $2`,
       [id, userClientId]
     );
 
