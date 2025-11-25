@@ -8,6 +8,9 @@ const logger = require(resolve('utils/logger'));
 // GET /api/actions - List all actions
 router.get('/', async (req, res) => {
   try {
+    // CRITICAL: User can only see their own company's actions
+    const userClientId = req.user.client_id;
+    
     const { 
       call_id,
       action_type,
@@ -16,9 +19,9 @@ router.get('/', async (req, res) => {
       offset = 0
     } = req.query;
 
-    let query = 'SELECT a.*, c.phone_from, c.client_id FROM actions a JOIN calls c ON a.call_id = c.id WHERE 1=1';
-    const params = [];
-    let paramIndex = 1;
+    let query = 'SELECT a.*, c.phone_from, c.client_id FROM actions a JOIN calls c ON a.call_id = c.id WHERE c.client_id = $1';
+    const params = [userClientId];
+    let paramIndex = 2;
 
     if (call_id) {
       query += ` AND a.call_id = $${paramIndex}`;

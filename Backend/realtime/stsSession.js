@@ -33,7 +33,7 @@ class STSSession extends EventEmitter {
     try {
       this.callId = callId;
 
-      const url = 'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-2024-12-26';
+      const url = 'wss://api.openai.com/v1/realtime?model=gpt-4o-audio-mini-2025-10-06';
 
       this.ws = new WebSocket(url, {
         headers: {
