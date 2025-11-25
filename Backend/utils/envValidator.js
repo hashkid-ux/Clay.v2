@@ -14,8 +14,7 @@ class EnvValidator {
       DATABASE_URL: { required: true },
       JWT_SECRET: { required: true, minLength: 32 },
       OPENAI_API_KEY: { required: true },
-      OPENAI_MODEL: { required: true },
-      
+
       // Optional vars (have defaults or are non-critical)
       LOG_LEVEL: { required: false, default: 'info', values: ['error', 'warn', 'info', 'debug'] },
       REDIS_URL: { required: false, default: 'redis://localhost:6379' },
