@@ -5,49 +5,48 @@ const resolve = require('../utils/moduleResolver');
 const db = require(resolve('db/postgres'));
 const logger = require(resolve('utils/logger'));
 
-// GET /api/analytics/kpis - Get key performance indicators
+// GET /api/analytics/kpis - Get key performance indicators (MULTI-TENANT: filtered by user's company)
 router.get('/kpis', async (req, res) => {
   try {
-    const { client_id, start_date, end_date } = req.query;
+    // CRITICAL: User can only see their own company's analytics
+    const userClientId = req.user.client_id;
+    const { start_date, end_date } = req.query;
 
-    let whereClause = 'WHERE 1=1';
-    const params = [];
-    let paramIndex = 1;
-
-    if (client_id) {
-      whereClause += ` AND client_id = $${paramIndex}`;
-      params.push(client_id);
-      paramIndex++;
-    }
+    let whereClause = 'WHERE c.client_id = $1';
+    const params = [userClientId];
+    let paramIndex = 2;
 
     if (start_date) {
-      whereClause += ` AND start_ts >= $${paramIndex}`;
+      whereClause += ` AND c.start_ts >= $${paramIndex}`;
       params.push(start_date);
       paramIndex++;
     }
 
     if (end_date) {
-      whereClause += ` AND start_ts <= $${paramIndex}`;
+      whereClause += ` AND c.start_ts <= $${paramIndex}`;
       params.push(end_date);
       paramIndex++;
     }
 
     // Total calls
     const totalCallsResult = await db.query(
-      `SELECT COUNT(*) as total FROM calls ${whereClause}`,
+      `SELECT COUNT(*) as total FROM calls c ${whereClause}`,
       params
     );
 
     // Resolved calls (automation rate)
+    const resolvedParams = [...params];
+    let resolvedWhereClause = whereClause.replace('WHERE ', 'WHERE ') + ' AND c.resolved = true';
     const resolvedCallsResult = await db.query(
-      `SELECT COUNT(*) as resolved FROM calls ${whereClause} AND resolved = true`,
-      params
+      `SELECT COUNT(*) as resolved FROM calls c ${resolvedWhereClause}`,
+      resolvedParams
     );
 
     // Average call duration (AHT)
+    let ahtWhereClause = whereClause.replace('WHERE ', 'WHERE ') + ' AND c.end_ts IS NOT NULL';
     const avgDurationResult = await db.query(
-      `SELECT AVG(EXTRACT(EPOCH FROM (end_ts - start_ts))) as avg_duration
-       FROM calls ${whereClause} AND end_ts IS NOT NULL`,
+      `SELECT AVG(EXTRACT(EPOCH FROM (c.end_ts - c.start_ts))) as avg_duration
+       FROM calls c ${ahtWhereClause}`,
       params
     );
 

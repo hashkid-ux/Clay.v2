@@ -4,27 +4,25 @@ const router = express.Router();
 const resolve = require('../utils/moduleResolver');
 const db = require(resolve('db/postgres'));
 const logger = require(resolve('utils/logger'));
+const Pagination = require(resolve('utils/pagination'));
 
-// GET /api/calls - List all calls
+// GET /api/calls - List all calls (MULTI-TENANT: filtered by user's client_id)
 router.get('/', async (req, res) => {
   try {
+    // CRITICAL: User can only see their own company's calls
+    const userClientId = req.user.client_id;
+    
+    // Use pagination utility
+    const pagination = Pagination.fromQuery(req.query);
+
     const { 
-      client_id, 
-      limit = 50, 
-      offset = 0,
       resolved,
       phone_from
     } = req.query;
 
-    let query = 'SELECT * FROM calls WHERE 1=1';
-    const params = [];
-    let paramIndex = 1;
-
-    if (client_id) {
-      query += ` AND client_id = $${paramIndex}`;
-      params.push(client_id);
-      paramIndex++;
-    }
+    let query = 'SELECT * FROM calls WHERE client_id = $1';
+    const params = [userClientId];
+    let paramIndex = 2;
 
     if (resolved !== undefined) {
       query += ` AND resolved = $${paramIndex}`;
@@ -38,21 +36,15 @@ router.get('/', async (req, res) => {
       paramIndex++;
     }
 
-    query += ` ORDER BY start_ts DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
-    params.push(parseInt(limit), parseInt(offset));
+    query += ` ORDER BY start_ts DESC${pagination.applySql()}`;
+    params.push(pagination.limit, pagination.offset);
 
     const result = await db.query(query, params);
 
-    // Get total count
-    let countQuery = 'SELECT COUNT(*) FROM calls WHERE 1=1';
-    const countParams = [];
-    let countParamIndex = 1;
-
-    if (client_id) {
-      countQuery += ` AND client_id = $${countParamIndex}`;
-      countParams.push(client_id);
-      countParamIndex++;
-    }
+    // Get total count - also filtered by client_id
+    let countQuery = 'SELECT COUNT(*) FROM calls WHERE client_id = $1';
+    const countParams = [userClientId];
+    let countParamIndex = 2;
 
     if (resolved !== undefined) {
       countQuery += ` AND resolved = $${countParamIndex}`;
@@ -66,36 +58,46 @@ router.get('/', async (req, res) => {
     }
 
     const countResult = await db.query(countQuery, countParams);
+    const total = parseInt(countResult.rows[0].count);
 
     res.json({
       calls: result.rows,
-      total: parseInt(countResult.rows[0].count),
-      limit: parseInt(limit),
-      offset: parseInt(offset)
+      ...pagination.getMetadata(total),
     });
 
   } catch (error) {
-    logger.error('Error fetching calls', { error: error.message });
+    logger.error('Error fetching calls', { error: error.message, userId: req.user?.id });
     res.status(500).json({ error: 'Failed to fetch calls' });
   }
 });
 
-// GET /api/calls/:id - Get single call with actions
+// GET /api/calls/:id - Get single call with actions (MULTI-TENANT: verify ownership)
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    const userClientId = req.user.client_id;
 
-    const call = await db.calls.getById(id);
+    // Verify call belongs to user's company
+    const call = await db.query(
+      'SELECT * FROM calls WHERE id = $1 AND client_id = $2',
+      [id, userClientId]
+    );
 
-    if (!call) {
+    if (!call.rows || call.rows.length === 0) {
       return res.status(404).json({ error: 'Call not found' });
     }
 
     // Get associated actions
-    const actions = await db.actions.getByCall(id);
+    const actions = await db.query(
+      'SELECT * FROM actions WHERE call_id = $1 AND client_id = $2 ORDER BY timestamp ASC',
+      [id, userClientId]
+    );
 
     // Get extracted entities
-    const entities = await db.entities.getByCall(id);
+    const entities = await db.query(
+      'SELECT * FROM entities WHERE call_id = $1 AND client_id = $2',
+      [id, userClientId]
+    );
 
     res.json({
       call,

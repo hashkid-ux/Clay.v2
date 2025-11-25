@@ -1,5 +1,10 @@
 // server.js - Main Caly Server (Updated for Multi-tenancy)
 require('dotenv').config();
+
+// CRITICAL: Validate environment variables BEFORE anything else
+const envValidator = require('./utils/envValidator');
+envValidator.validate();
+
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
@@ -10,54 +15,194 @@ const resolve = require('./utils/moduleResolver');
 const logger = require(resolve('utils/logger'));
 const db = require(resolve('db/postgres'));
 const sessionManager = require(resolve('sessions/CallSessionManager'));
+const GracefulShutdown = require(resolve('utils/gracefulShutdown'));
+const requestIdMiddleware = require(resolve('middleware/requestId'));
+const setupSwagger = require(resolve('docs/swagger'));
 
 const app = express();
 const server = createServer(app);
 const wss = new WebSocket.Server({ server, path: '/audio' });
 
+// Import new Phase 2 middleware
+const {
+  httpsRedirect,
+  securityHeaders,
+} = require(resolve('middleware/security'));
+const {
+  requestLogger,
+  requestBodyLogger,
+  errorResponseLogger,
+  anomalyDetector,
+  performanceTracker,
+  slowRequestDetector,
+} = require(resolve('middleware/logging'));
+const {
+  createConnectionPool,
+  poolStatsMiddleware,
+} = require(resolve('db/pooling'));
+
 // Middleware
 app.use(helmet());
 app.use(cors());
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+
+// Request size limits (security)
+app.use(bodyParser.json({ limit: '1mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '1kb' }));
 app.use(bodyParser.raw({ type: 'audio/wav', limit: '10mb' }));
+
+// Request ID (must be early for correlation)
+app.use(requestIdMiddleware);
+
+// Request context (must be after requestId)
+app.use(requestContextMiddleware);
+
+// HTTPS redirect and security headers (Phase 2)
+app.use(httpsRedirect);
+app.use(securityHeaders);
+
+// Enhanced logging (Phase 2)
+app.use(anomalyDetector);
+app.use(performanceTracker);
+app.use(slowRequestDetector(1000)); // Log requests slower than 1 second
+
+// Audit logging
+app.use(auditLogger.auditMiddleware);
+
+// Detailed request logging
+app.use(requestLogger);
+app.use(requestBodyLogger);
+app.use(errorResponseLogger);
 
 // Request logging
 app.use((req, res, next) => {
   logger.info(`${req.method} ${req.path}`, {
     ip: req.ip,
-    userAgent: req.get('user-agent')
+    requestId: req.requestId,
+    userAgent: req.get('user-agent'),
   });
   next();
 });
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
+// Setup Swagger/OpenAPI documentation
+setupSwagger(app);
+
+// Health check routes
+app.use('/health', require(resolve('routes/health')));
+
+// Legacy health endpoint for backward compatibility
+app.get('/health-legacy', (req, res) => {
+  res.json({
+    status: 'ok',
     timestamp: new Date().toISOString(),
     service: 'caly-voice-agent',
     version: '1.0.0',
     agents: {
       total: 14,
-      registered: Object.keys(require('./agents/orchestrator').agentRegistry || {}).length
-    }
+      registered: Object.keys(require('./agents/orchestrator').agentRegistry || {}).length,
+    },
   });
 });
 
-// Exotel webhooks
-const exotelRoutes = require(resolve('routes/exotel'));
-app.post('/webhooks/exotel/call-start', exotelRoutes.handleCallStart);
-app.post('/webhooks/exotel/call-end', exotelRoutes.handleCallEnd);
-app.post('/webhooks/exotel/recording', exotelRoutes.handleRecording);
+// Authentication routes (public - no auth required)
+// Apply strict rate limiting to login endpoint
+app.use('/api/auth/login', loginRateLimiter);
+app.use('/api/auth', require(resolve('routes/auth')));
 
-// Dashboard API routes
-app.use('/api/calls', require(resolve('routes/calls')));
-app.use('/api/actions', require(resolve('routes/actions')));
-app.use('/api/analytics', require(resolve('routes/analytics')));
-app.use('/api/analytics', require(resolve('routes/analyticsEnhanced')));
-app.use('/api/calls', require(resolve('routes/livecalls')));
-app.use('/api/clients', require(resolve('routes/clients'))); // NEW: Multi-tenancy
+// Exotel webhooks (with webhook rate limiting)
+const exotelRoutes = require(resolve('routes/exotel'));
+app.post('/webhooks/exotel/call-start', webhookRateLimiter, exotelRoutes.handleCallStart);
+app.post('/webhooks/exotel/call-end', webhookRateLimiter, exotelRoutes.handleCallEnd);
+app.post('/webhooks/exotel/recording', webhookRateLimiter, exotelRoutes.handleRecording);
+
+// Protected dashboard API routes (require authentication)
+const { authMiddleware } = require(resolve('auth/authMiddleware'));
+
+// Apply API rate limiting to all protected routes
+app.use('/api/', apiRateLimiter);
+
+// Onboarding setup routes (protected - clients configure during setup)
+app.use('/api/onboarding', authMiddleware, require(resolve('routes/onboarding')));
+app.use('/api/calls', authMiddleware, require(resolve('routes/calls')));
+app.use('/api/actions', authMiddleware, require(resolve('routes/actions')));
+app.use('/api/analytics', authMiddleware, require(resolve('routes/analytics')));
+app.use('/api/analytics', authMiddleware, require(resolve('routes/analyticsEnhanced')));
+app.use('/api/calls', authMiddleware, require(resolve('routes/livecalls')));
+app.use('/api/clients', authMiddleware, require(resolve('routes/clients'))); // Multi-tenancy + dashboard route
+app.use('/api/recordings', authMiddleware, require(resolve('routes/recordings'))); // Call recordings from Wasabi
+
+// Dashboard endpoint (from clients route)
+app.get('/api/analytics/dashboard', authMiddleware, async (req, res) => {
+  try {
+    const userClientId = req.user.client_id;
+
+    // Today's stats
+    const todayResult = await db.query(
+      `SELECT 
+        COUNT(*) as calls,
+        SUM(CAST(call_cost AS NUMERIC)) as revenue,
+        AVG(EXTRACT(EPOCH FROM (end_ts - start_ts))/60) as avg_duration
+       FROM calls 
+       WHERE client_id = $1 AND DATE(start_ts) = CURRENT_DATE AND end_ts IS NOT NULL`,
+      [userClientId]
+    );
+
+    const today = todayResult.rows[0];
+
+    // Yesterday for comparison
+    const yesterdayResult = await db.query(
+      `SELECT 
+        COUNT(*) as calls,
+        SUM(CAST(call_cost AS NUMERIC)) as revenue
+       FROM calls 
+       WHERE client_id = $1 AND DATE(start_ts) = CURRENT_DATE - INTERVAL '1 day'`,
+      [userClientId]
+    );
+
+    const yesterday = yesterdayResult.rows[0];
+
+    const todaysCalls = parseInt(today?.calls || 0);
+    const yesterdaysCalls = parseInt(yesterday?.calls || 0);
+    const callsChange = yesterdaysCalls > 0 
+      ? (((todaysCalls - yesterdaysCalls) / yesterdaysCalls) * 100).toFixed(1)
+      : 0;
+
+    const todaysRevenue = parseFloat(today?.revenue || 0);
+    const yesterdaysRevenue = parseFloat(yesterday?.revenue || 0);
+    const revenueChange = yesterdaysRevenue > 0
+      ? (((todaysRevenue - yesterdaysRevenue) / yesterdaysRevenue) * 100).toFixed(1)
+      : 0;
+
+    // Satisfaction
+    const satisfactionResult = await db.query(
+      `SELECT 
+        ROUND(COUNT(CASE WHEN feedback_score >= 4 THEN 1 END) * 100.0 / 
+        NULLIF(COUNT(*), 0), 2) as satisfaction_rate
+       FROM calls 
+       WHERE client_id = $1 AND feedback_score IS NOT NULL AND DATE(start_ts) = CURRENT_DATE`,
+      [userClientId]
+    );
+
+    const satisfactionRate = parseFloat(satisfactionResult.rows[0]?.satisfaction_rate || 0);
+
+    res.json({
+      todaysCalls,
+      callsChange,
+      todaysRevenue: parseFloat(todaysRevenue.toFixed(2)),
+      revenueChange,
+      avgDuration: parseFloat((today?.avg_duration || 0).toFixed(2)),
+      durationChange: 0,
+      satisfactionRate,
+      satisfactionChange: 0
+    });
+
+  } catch (error) {
+    logger.error('Error fetching dashboard', { 
+      error: error.message, 
+      userId: req.user?.id 
+    });
+    res.status(500).json({ error: 'Failed to fetch dashboard data' });
+  }
+});
 
 // WebSocket connection for audio streaming
 wss.on('connection', async (ws, req) => {
@@ -123,24 +268,14 @@ wss.on('connection', async (ws, req) => {
   }
 });
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  logger.error('Unhandled error', {
-    error: err.message,
-    stack: err.stack,
-    path: req.path
-  });
-  
-  res.status(500).json({
-    error: 'Internal server error',
-    message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
-  });
+// 404 handler - must come before error handler
+app.use((req, res, next) => {
+  const error = new NotFoundError('API endpoint');
+  next(error);
 });
 
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({ error: 'Not found' });
-});
+// Error handling middleware - MUST BE LAST
+app.use(errorHandler);
 
 // Graceful shutdown
 const gracefulShutdown = async () => {
@@ -173,6 +308,16 @@ server.listen(PORT, HOST, async () => {
   logger.info(`🎧 WebSocket audio server on ws://${HOST}:${PORT}/audio`);
   logger.info(`👥 Multi-tenancy enabled - /api/clients`);
   logger.info(`🤖 14 agents registered and ready`);
+  
+  // Setup graceful shutdown handlers
+  const shutdown = new GracefulShutdown(server, db, null);
+  shutdown.attachHandlers();
+  
+  // Track active requests for graceful shutdown
+  app.use((req, res, next) => {
+    shutdown.trackRequest(req, res);
+    next();
+  });
   
   // Test database connection
   try {

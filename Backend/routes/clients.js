@@ -1,381 +1,283 @@
 // Backend/routes/clients.js - Client management for multi-tenancy
 const express = require('express');
 const router = express.Router();
-const db = require('../db/postgres');
-const logger = require('../utils/logger');
-const { v4: uuidv4 } = require('uuid');
+const resolve = require('../utils/moduleResolver');
+const db = require(resolve('db/postgres'));
+const logger = require(resolve('utils/logger'));
+const { enforceClientAccess } = require(resolve('auth/authMiddleware'));
 
-// GET /api/clients - List all clients (admin only)
-router.get('/', async (req, res) => {
+// GET /api/clients/:id - Get single client (MULTI-TENANT: user can only access their own)
+router.get('/:id', enforceClientAccess, async (req, res) => {
   try {
-    const { active, limit = 50, offset = 0 } = req.query;
+    const { id } = req.params;
+    const userClientId = req.user.client_id;
 
-    let query = 'SELECT * FROM clients WHERE 1=1';
-    const params = [];
-    let paramIndex = 1;
-
-    if (active !== undefined) {
-      query += ` AND active = $${paramIndex}`;
-      params.push(active === 'true');
-      paramIndex++;
+    // Verify user owns this client
+    if (id !== userClientId) {
+      return res.status(403).json({ error: 'Unauthorized' });
     }
 
-    query += ` ORDER BY created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
-    params.push(parseInt(limit), parseInt(offset));
+    const result = await db.query(
+      `SELECT id, company_name, created_at, settings FROM clients WHERE id = $1`,
+      [userClientId]
+    );
 
-    const result = await db.query(query, params);
+    if (!result.rows || result.rows.length === 0) {
+      return res.status(404).json({ error: 'Company not found' });
+    }
+
+    const client = result.rows[0];
 
     res.json({
-      clients: result.rows.map(c => ({
-        ...c,
-        // Don't expose sensitive keys in list
-        shopify_api_secret: undefined,
-        shiprocket_password: undefined
-      })),
-      limit: parseInt(limit),
-      offset: parseInt(offset)
+      id: client.id,
+      companyName: client.company_name,
+      settings: client.settings || {},
+      createdAt: client.created_at
     });
 
   } catch (error) {
-    logger.error('Error fetching clients', { error: error.message });
-    res.status(500).json({ error: 'Failed to fetch clients' });
+    logger.error('Error fetching client', { error: error.message, userId: req.user?.id });
+    res.status(500).json({ error: 'Failed to fetch company info' });
   }
 });
 
-// POST /api/clients - Create new client
-router.post('/', async (req, res) => {
+// PUT /api/clients/:id - Update company configuration (MULTI-TENANT: user can only update their own)
+router.put('/:id', enforceClientAccess, async (req, res) => {
   try {
+    const { id } = req.params;
+    const userClientId = req.user.client_id;
+
+    // Verify user owns this client
+    if (id !== userClientId) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
     const {
-      companyName,
-      contactPerson,
-      email,
-      phone,
       shopifyStore,
       shopifyApiKey,
       shopifyApiSecret,
       exotelNumber,
       exotelSid,
       exotelToken,
-      returnWindowDays = 14,
-      refundAutoThreshold = 2000,
-      cancelWindowHours = 24,
-      enableWhatsApp = false,
-      enableSMS = true,
-      enableEmail = true
+      returnWindowDays,
+      refundAutoThreshold,
+      cancelWindowHours,
+      enableWhatsApp,
+      enableSMS,
+      enableEmail,
+      timezone,
+      language
     } = req.body;
 
-    // Validation
-    if (!companyName || !email || !shopifyStore) {
+    // Validate required fields
+    if (!shopifyStore || !exotelNumber) {
       return res.status(400).json({ 
-        error: 'Missing required fields: companyName, email, shopifyStore' 
+        error: 'Shopify store and Exotel number are required' 
       });
     }
 
-    // Check if client already exists
-    const existingClient = await db.query(
-      'SELECT id FROM clients WHERE shopify_store_url = $1 OR email = $2',
-      [shopifyStore, email]
-    );
-
-    if (existingClient.rows.length > 0) {
-      return res.status(409).json({ 
-        error: 'Client with this Shopify store or email already exists' 
-      });
-    }
-
-    // Create client
-    const result = await db.query(
-      `INSERT INTO clients (
-        name, contact_person, email, phone,
-        shopify_store_url, shopify_api_key, shopify_api_secret,
-        exotel_number, exotel_sid, exotel_token,
-        return_window_days, refund_auto_threshold, cancel_window_hours,
-        enable_whatsapp, enable_sms, enable_email,
-        active
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, true)
-      RETURNING *`,
-      [
-        companyName, contactPerson, email, phone,
-        shopifyStore, shopifyApiKey, shopifyApiSecret,
-        exotelNumber, exotelSid, exotelToken,
-        returnWindowDays, refundAutoThreshold, cancelWindowHours,
-        enableWhatsApp, enableSMS, enableEmail
-      ]
-    );
-
-    const client = result.rows[0];
-
-    // Log audit event
-    await db.auditLog({
-      client_id: client.id,
-      event_type: 'client_created',
-      payload: { company_name: companyName, email },
-      ip_address: req.ip
-    });
-
-    logger.info('Client created', { 
-      clientId: client.id,
-      companyName 
-    });
-
-    // Don't return sensitive data
-    delete client.shopify_api_secret;
-    delete client.exotel_token;
-
-    res.status(201).json({ 
-      client,
-      message: 'Client created successfully' 
-    });
-
-  } catch (error) {
-    logger.error('Error creating client', { error: error.message });
-    res.status(500).json({ error: 'Failed to create client' });
-  }
-});
-
-// GET /api/clients/:id - Get single client
-router.get('/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const client = await db.clients.getById(id);
-
-    if (!client) {
-      return res.status(404).json({ error: 'Client not found' });
-    }
-
-    // Don't expose API secrets
-    delete client.shopify_api_secret;
-    delete client.shiprocket_password;
-    delete client.exotel_token;
-
-    res.json({ client });
-
-  } catch (error) {
-    logger.error('Error fetching client', { 
-      clientId: req.params.id,
-      error: error.message 
-    });
-    res.status(500).json({ error: 'Failed to fetch client' });
-  }
-});
-
-// PATCH /api/clients/:id - Update client
-router.patch('/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const updates = req.body;
-
-    // Allowed fields to update
-    const allowedFields = [
-      'name', 'contact_person', 'email', 'phone',
-      'shopify_store_url', 'shopify_api_key', 'shopify_api_secret',
-      'exotel_number', 'exotel_sid', 'exotel_token',
-      'return_window_days', 'refund_auto_threshold', 'cancel_window_hours',
-      'enable_whatsapp', 'enable_sms', 'enable_email',
-      'active'
-    ];
-
-    const fields = [];
-    const values = [];
-    let paramIndex = 1;
-
-    Object.keys(updates).forEach(key => {
-      if (allowedFields.includes(key)) {
-        fields.push(`${key} = $${paramIndex}`);
-        values.push(updates[key]);
-        paramIndex++;
+    // Build settings object
+    const settings = {
+      shopify: {
+        store: shopifyStore,
+        apiKey: shopifyApiKey,
+        apiSecret: shopifyApiSecret
+      },
+      exotel: {
+        number: exotelNumber,
+        sid: exotelSid,
+        token: exotelToken
+      },
+      business: {
+        returnWindowDays: parseInt(returnWindowDays) || 14,
+        refundAutoThreshold: parseInt(refundAutoThreshold) || 2000,
+        cancelWindowHours: parseInt(cancelWindowHours) || 24,
+        escalationThreshold: parseInt(req.body.escalationThreshold) || 60
+      },
+      channels: {
+        whatsApp: enableWhatsApp || false,
+        sms: enableSMS !== false,
+        email: enableEmail !== false
+      },
+      localization: {
+        timezone: timezone || 'Asia/Kolkata',
+        language: language || 'hi'
       }
-    });
+    };
 
-    if (fields.length === 0) {
-      return res.status(400).json({ error: 'No valid fields to update' });
-    }
-
-    values.push(id);
+    // Update client settings
     const result = await db.query(
-      `UPDATE clients SET ${fields.join(', ')}, updated_at = NOW() 
-       WHERE id = $${paramIndex} 
-       RETURNING *`,
-      values
+      `UPDATE clients 
+       SET settings = $1, updated_at = NOW() 
+       WHERE id = $2 
+       RETURNING id, company_name, settings`,
+      [JSON.stringify(settings), userClientId]
     );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Client not found' });
+    if (!result.rows || result.rows.length === 0) {
+      return res.status(404).json({ error: 'Company not found' });
     }
 
-    const client = result.rows[0];
+    const updatedClient = result.rows[0];
 
-    // Log audit event
-    await db.auditLog({
-      client_id: id,
-      event_type: 'client_updated',
-      payload: updates,
-      ip_address: req.ip
+    logger.info('Client updated', { 
+      clientId: userClientId, 
+      userId: req.user.id 
     });
 
-    logger.info('Client updated', { clientId: id, updates });
-
-    // Don't return sensitive data
-    delete client.shopify_api_secret;
-    delete client.exotel_token;
-
-    res.json({ client });
+    res.json({
+      id: updatedClient.id,
+      companyName: updatedClient.company_name,
+      settings: updatedClient.settings || {},
+      message: 'Company configuration updated successfully'
+    });
 
   } catch (error) {
     logger.error('Error updating client', { 
-      clientId: req.params.id,
-      error: error.message 
+      error: error.message, 
+      userId: req.user?.id,
+      clientId: req.user?.client_id 
     });
-    res.status(500).json({ error: 'Failed to update client' });
+    res.status(500).json({ error: 'Failed to update company info' });
   }
 });
 
-// DELETE /api/clients/:id - Deactivate client (soft delete)
-router.delete('/:id', async (req, res) => {
+// GET /api/clients/:id/stats - Get company statistics (MULTI-TENANT)
+router.get('/:id/stats', enforceClientAccess, async (req, res) => {
   try {
     const { id } = req.params;
+    const userClientId = req.user.client_id;
 
-    const result = await db.query(
-      'UPDATE clients SET active = false, updated_at = NOW() WHERE id = $1 RETURNING *',
-      [id]
+    if (id !== userClientId) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    const { days = 7 } = req.query;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - parseInt(days));
+
+    // Get today's calls
+    const todaysCallsResult = await db.query(
+      `SELECT COUNT(*) as count, SUM(CAST(call_cost AS NUMERIC)) as revenue
+       FROM calls 
+       WHERE client_id = $1 AND DATE(start_ts) = CURRENT_DATE`,
+      [userClientId]
     );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Client not found' });
-    }
+    // Get average duration
+    const avgDurationResult = await db.query(
+      `SELECT AVG(EXTRACT(EPOCH FROM (end_ts - start_ts))) as avg_seconds
+       FROM calls 
+       WHERE client_id = $1 AND start_ts >= $2 AND end_ts IS NOT NULL`,
+      [userClientId, startDate]
+    );
 
-    // Log audit event
-    await db.auditLog({
-      client_id: id,
-      event_type: 'client_deactivated',
-      payload: {},
-      ip_address: req.ip
-    });
-
-    logger.info('Client deactivated', { clientId: id });
-
-    res.json({ message: 'Client deactivated successfully' });
-
-  } catch (error) {
-    logger.error('Error deactivating client', { 
-      clientId: req.params.id,
-      error: error.message 
-    });
-    res.status(500).json({ error: 'Failed to deactivate client' });
-  }
-});
-
-// GET /api/clients/:id/stats - Get client statistics
-router.get('/:id/stats', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { start_date, end_date } = req.query;
-
-    // Verify client exists
-    const client = await db.clients.getById(id);
-    if (!client) {
-      return res.status(404).json({ error: 'Client not found' });
-    }
-
-    let whereClause = 'WHERE client_id = $1';
-    const params = [id];
-    let paramIndex = 2;
-
-    if (start_date) {
-      whereClause += ` AND start_ts >= $${paramIndex}`;
-      params.push(start_date);
-      paramIndex++;
-    }
-
-    if (end_date) {
-      whereClause += ` AND start_ts <= $${paramIndex}`;
-      params.push(end_date);
-      paramIndex++;
-    }
-
-    // Get call statistics
-    const callStats = await db.query(
+    // Get satisfaction rate
+    const satisfactionResult = await db.query(
       `SELECT 
-        COUNT(*) as total_calls,
-        COUNT(CASE WHEN resolved = true THEN 1 END) as resolved_calls,
-        AVG(EXTRACT(EPOCH FROM (end_ts - start_ts))) as avg_duration
-       FROM calls ${whereClause}`,
-      params
+        COUNT(CASE WHEN feedback_score >= 4 THEN 1 END) * 100.0 / 
+        NULLIF(COUNT(*), 0) as satisfaction_rate
+       FROM calls 
+       WHERE client_id = $1 AND feedback_score IS NOT NULL`,
+      [userClientId]
     );
 
-    // Get action breakdown
-    const actionStats = await db.query(
-      `SELECT 
-        a.action_type,
-        COUNT(*) as count,
-        COUNT(CASE WHEN a.status = 'success' THEN 1 END) as success_count
-       FROM actions a
-       JOIN calls c ON a.call_id = c.id
-       ${whereClause}
-       GROUP BY a.action_type
-       ORDER BY count DESC`,
-      params
-    );
+    const todaysCalls = parseInt(todaysCallsResult.rows[0]?.count || 0);
+    const todaysRevenue = parseFloat(todaysCallsResult.rows[0]?.revenue || 0);
+    const avgDuration = parseFloat(avgDurationResult.rows[0]?.avg_seconds || 0) / 60; // Convert to minutes
+    const satisfactionRate = parseFloat(satisfactionResult.rows[0]?.satisfaction_rate || 0);
 
-    const stats = {
-      total_calls: parseInt(callStats.rows[0].total_calls),
-      resolved_calls: parseInt(callStats.rows[0].resolved_calls),
-      automation_rate: callStats.rows[0].total_calls > 0 
-        ? ((callStats.rows[0].resolved_calls / callStats.rows[0].total_calls) * 100).toFixed(2) + '%'
-        : '0%',
-      avg_handling_time: Math.round(callStats.rows[0].avg_duration || 0),
-      actions_breakdown: actionStats.rows
-    };
-
-    res.json({ stats });
+    res.json({
+      todaysCalls,
+      todaysRevenue: parseFloat(todaysRevenue.toFixed(2)),
+      avgDuration: parseFloat(avgDuration.toFixed(2)),
+      satisfactionRate: parseFloat(satisfactionRate.toFixed(2)),
+      period: {
+        days,
+        startDate: startDate.toISOString()
+      }
+    });
 
   } catch (error) {
     logger.error('Error fetching client stats', { 
-      clientId: req.params.id,
-      error: error.message 
+      error: error.message, 
+      userId: req.user?.id 
     });
-    res.status(500).json({ error: 'Failed to fetch statistics' });
+    res.status(500).json({ error: 'Failed to fetch stats' });
   }
 });
 
-// POST /api/clients/:id/test-call - Initiate test call
-router.post('/:id/test-call', async (req, res) => {
+// GET /api/analytics/dashboard - Get dashboard data (MULTI-TENANT)
+router.get('/analytics/dashboard', enforceClientAccess, async (req, res) => {
   try {
-    const { id } = req.params;
-    const { phone_number } = req.body;
+    const userClientId = req.user.client_id;
 
-    if (!phone_number) {
-      return res.status(400).json({ error: 'phone_number is required' });
-    }
+    // Today's stats
+    const todayResult = await db.query(
+      `SELECT 
+        COUNT(*) as calls,
+        SUM(CAST(call_cost AS NUMERIC)) as revenue,
+        AVG(EXTRACT(EPOCH FROM (end_ts - start_ts))/60) as avg_duration
+       FROM calls 
+       WHERE client_id = $1 AND DATE(start_ts) = CURRENT_DATE AND end_ts IS NOT NULL`,
+      [userClientId]
+    );
 
-    const client = await db.clients.getById(id);
-    if (!client) {
-      return res.status(404).json({ error: 'Client not found' });
-    }
+    const today = todayResult.rows[0];
 
-    // In production, integrate with Exotel API to initiate call
-    // For now, create a test call record
-    const testCall = await db.calls.create({
-      client_id: id,
-      call_sid: 'TEST_' + Date.now(),
-      phone_from: phone_number,
-      phone_to: client.exotel_number
-    });
+    // Yesterday for comparison
+    const yesterdayResult = await db.query(
+      `SELECT 
+        COUNT(*) as calls,
+        SUM(CAST(call_cost AS NUMERIC)) as revenue
+       FROM calls 
+       WHERE client_id = $1 AND DATE(start_ts) = CURRENT_DATE - INTERVAL '1 day'`,
+      [userClientId]
+    );
 
-    logger.info('Test call initiated', { clientId: id, phone: phone_number });
+    const yesterday = yesterdayResult.rows[0];
+
+    const todaysCalls = parseInt(today?.calls || 0);
+    const yesterdaysCalls = parseInt(yesterday?.calls || 0);
+    const callsChange = yesterdaysCalls > 0 
+      ? (((todaysCalls - yesterdaysCalls) / yesterdaysCalls) * 100).toFixed(1)
+      : 0;
+
+    const todaysRevenue = parseFloat(today?.revenue || 0);
+    const yesterdaysRevenue = parseFloat(yesterday?.revenue || 0);
+    const revenueChange = yesterdaysRevenue > 0
+      ? (((todaysRevenue - yesterdaysRevenue) / yesterdaysRevenue) * 100).toFixed(1)
+      : 0;
+
+    // Satisfaction
+    const satisfactionResult = await db.query(
+      `SELECT 
+        ROUND(COUNT(CASE WHEN feedback_score >= 4 THEN 1 END) * 100.0 / 
+        NULLIF(COUNT(*), 0), 2) as satisfaction_rate
+       FROM calls 
+       WHERE client_id = $1 AND feedback_score IS NOT NULL AND DATE(start_ts) = CURRENT_DATE`,
+      [userClientId]
+    );
+
+    const satisfactionRate = parseFloat(satisfactionResult.rows[0]?.satisfaction_rate || 0);
 
     res.json({
-      message: 'Test call initiated',
-      call_id: testCall.id
+      todaysCalls,
+      callsChange,
+      todaysRevenue: parseFloat(todaysRevenue.toFixed(2)),
+      revenueChange,
+      avgDuration: parseFloat((today?.avg_duration || 0).toFixed(2)),
+      durationChange: 0,
+      satisfactionRate,
+      satisfactionChange: 0
     });
 
   } catch (error) {
-    logger.error('Error initiating test call', { 
-      clientId: req.params.id,
-      error: error.message 
+    logger.error('Error fetching dashboard', { 
+      error: error.message, 
+      userId: req.user?.id 
     });
-    res.status(500).json({ error: 'Failed to initiate test call' });
+    res.status(500).json({ error: 'Failed to fetch dashboard data' });
   }
 });
 

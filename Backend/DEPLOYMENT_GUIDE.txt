@@ -1,0 +1,317 @@
+#!/usr/bin/env node
+/**
+ * Backend/DEPLOYMENT_GUIDE.txt - Complete Wasabi & Production Deployment Guide
+ * 
+ * This guide covers:
+ * 1. Wasabi S3-compatible storage setup for call recordings
+ * 2. Environment variable configuration
+ * 3. Database initialization
+ * 4. Railway deployment
+ * 5. Monitoring & troubleshooting
+ */
+
+═══════════════════════════════════════════════════════════════════════════════
+📦 WASABI STORAGE SETUP (for call recordings)
+═══════════════════════════════════════════════════════════════════════════════
+
+Why Wasabi instead of AWS S3?
+• 80% cheaper: $5.99/month flat vs AWS variable costs
+• Perfect for recording storage: 1000s of uploads/month
+• S3-compatible: No code changes needed
+• Unlimited buckets, no hidden charges
+
+Step 1: Create Wasabi Account
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. Visit: https://wasabi.com
+2. Sign up (free account)
+3. Login to dashboard
+4. Go to: Access Keys section
+5. Create new access key pair
+6. Note down:
+   - Access Key ID: wasabi_access_key_xxxxx
+   - Secret Access Key: wasabi_secret_key_xxxxx
+7. Select region: US East 1 (good latency for India)
+
+Step 2: Create S3 Bucket
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. In Wasabi Dashboard → Buckets → "Create Bucket"
+2. Bucket name: caly-call-recordings
+3. Region: us-east-1
+4. Click Create
+
+Step 3: Configure Bucket Lifecycle (auto-cleanup)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. Go to: Bucket → Lifecycle Policies
+2. Create policy:
+   - Prefix: recordings/
+   - Action: Delete objects
+   - After: 90 days (or your preference)
+3. Save
+
+This automatically deletes old recordings to control costs.
+
+═══════════════════════════════════════════════════════════════════════════════
+🔧 ENVIRONMENT VARIABLES (Backend/.env)
+═══════════════════════════════════════════════════════════════════════════════
+
+CRITICAL VARIABLES (Must have):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+NODE_ENV=production
+PORT=8080
+DATABASE_URL=postgresql://postgres:password@host:5432/caly_production
+
+# JWT Authentication
+JWT_SECRET=<YOUR-32-CHAR-RANDOM-SECRET>
+JWT_EXPIRY=24h
+REFRESH_TOKEN_EXPIRY=7d
+
+# OpenAI API
+OPENAI_API_KEY=sk-proj-xxxxxxxxxxxxx
+OPENAI_REALTIME_MODEL=gpt-4o-realtime-preview
+
+# Exotel (Voice Calls)
+EXOTEL_SID=your-exotel-sid
+EXOTEL_TOKEN=your-exotel-token
+EXOTEL_PHONE_NUMBER=+91xxxxxxxxxx
+
+# Wasabi (Call Recordings) ⭐ NEW
+WASABI_ENABLED=true
+WASABI_ACCESS_KEY_ID=your-wasabi-access-key
+WASABI_SECRET_ACCESS_KEY=your-wasabi-secret-key
+WASABI_REGION=us-east-1
+WASABI_BUCKET_NAME=caly-call-recordings
+WASABI_ENDPOINT=https://s3.wasabisys.com
+WASABI_PUBLIC_URL=https://caly-call-recordings.s3.wasabisys.com
+
+# Email (OTP Verification)
+SMTP_HOST=smtp.gmail.com
+SMTP_USER=your-email@gmail.com
+SMTP_PASS=your-gmail-app-password
+
+# Security & Webhook
+SESSION_SECRET=<YOUR-32-CHAR-RANDOM-SECRET>
+ENCRYPTION_KEY=<YOUR-32-CHAR-RANDOM-SECRET>
+WEBHOOK_BASE_URL=https://calybackend-production.up.railway.app
+CORS_ORIGIN=https://app.caly.yourdomain.com
+
+Generate Random Secrets:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+
+═══════════════════════════════════════════════════════════════════════════════
+🗄️ DATABASE INITIALIZATION
+═══════════════════════════════════════════════════════════════════════════════
+
+Step 1: Initialize Main Schema
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+npm run init-db
+# This creates all required tables
+
+Step 2: Initialize Wasabi Schema
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+node scripts/init-wasabi-db.js
+# This adds recording_url column and call_charges table
+
+Step 3: Verify Installation
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+psql $DATABASE_URL -c "
+  SELECT table_name FROM information_schema.tables 
+  WHERE table_schema = 'public' ORDER BY table_name;
+"
+
+Expected tables:
+- calls (with recording_url column)
+- call_charges (for billing)
+- clients (with Shopify/Exotel fields)
+- company_users (auth)
+- ... and others
+
+═══════════════════════════════════════════════════════════════════════════════
+🚀 RAILWAY DEPLOYMENT
+═══════════════════════════════════════════════════════════════════════════════
+
+Step 1: Connect GitHub Repository
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. Go to: https://railway.app/dashboard
+2. Click "New Project" → "Deploy from GitHub"
+3. Select your repository
+4. Click Deploy
+
+Step 2: Add PostgreSQL Service
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. In Railway dashboard → Click "+" → PostgreSQL
+2. Connect to the Node.js service
+3. This automatically sets DATABASE_URL
+
+Step 3: Set Environment Variables
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. Go to: Node.js service → Variables
+2. Add all variables from .env file:
+   - JWT_SECRET
+   - OPENAI_API_KEY
+   - EXOTEL_SID, EXOTEL_TOKEN, EXOTEL_PHONE_NUMBER
+   - WASABI_ACCESS_KEY_ID
+   - WASABI_SECRET_ACCESS_KEY
+   - WASABI_REGION
+   - WASABI_BUCKET_NAME
+   - WASABI_ENDPOINT
+   - WASABI_PUBLIC_URL
+   - SMTP_HOST, SMTP_USER, SMTP_PASS
+   - CORS_ORIGIN (your frontend domain)
+   - ... and others
+
+Step 4: Configure Build & Deploy
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. Go to: Deployments → Settings
+2. Build Command: npm install
+3. Start Command: npm run deploy
+   (This runs init-db, then starts server)
+4. Save
+
+Step 5: Run Migrations
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Option A: Via Railway Console
+- Go to Deployments → Connect → Console
+- Run: node scripts/init-wasabi-db.js
+
+Option B: Via Custom Start Script
+- Update start command to: node scripts/init-db.js && node scripts/init-wasabi-db.js && node server.js
+
+═══════════════════════════════════════════════════════════════════════════════
+🔍 VERIFY WASABI CONFIGURATION
+═══════════════════════════════════════════════════════════════════════════════
+
+Check if Wasabi is working:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+curl https://your-railway-url.railway.app/api/recordings/storage/stats \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+
+Expected response:
+{
+  "bucket": "caly-call-recordings",
+  "fileCount": 0,
+  "totalSizeBytes": 0,
+  "totalSizeMB": "0.00",
+  "totalSizeGB": "0.00",
+  "estimatedMonthlyCost": "$5.99"
+}
+
+═══════════════════════════════════════════════════════════════════════════════
+📊 CALL FLOW WITH WASABI INTEGRATION
+═══════════════════════════════════════════════════════════════════════════════
+
+1. Call starts
+   ├─ STSSession opens WebSocket to OpenAI Realtime API
+   ├─ Audio captured in memory (session.audioBuffer)
+   └─ Conversation happens
+
+2. Call ends (endSession)
+   ├─ STSSession stopped
+   ├─ Audio buffer ready
+   ├─ wasabiStorage.uploadCallRecording() called
+   ├─ File uploaded to Wasabi: recordings/YYYY-MM-DD/callId.mp3
+   ├─ Recording URL stored in database (calls.recording_url)
+   ├─ Call charges calculated (duration * ₹30/minute)
+   ├─ Call data saved to calls table
+   └─ Session cleaned up
+
+3. Retrieve recording later
+   ├─ GET /api/recordings/:callId
+   ├─ Backend validates client ownership
+   ├─ Generates pre-signed URL (valid 1 hour)
+   ├─ Frontend plays audio via <audio> tag
+   └─ Pre-signed URL expires automatically
+
+═══════════════════════════════════════════════════════════════════════════════
+💰 COST BREAKDOWN (Monthly Estimate)
+═══════════════════════════════════════════════════════════════════════════════
+
+Scenario: 1000 calls/month, 5 min avg = 5000 minutes
+
+Wasabi Storage:
+├─ 5000 min * 5KB/sec * 60 = ~1.5 GB
+├─ Wasabi flat rate: $5.99/month (includes 1TB)
+└─ Per-call cost: $0.006
+
+AWS S3 (for comparison):
+├─ 1.5 GB * $0.023 = $34.50 storage
+├─ Data transfer: ~$0.009 per call = $9/month
+├─ API requests: ~$0.001/month
+└─ Total: ~$44/month (7x more expensive!)
+
+Savings with Wasabi: ~$39/month per 1000 calls!
+
+═══════════════════════════════════════════════════════════════════════════════
+🐛 TROUBLESHOOTING
+═══════════════════════════════════════════════════════════════════════════════
+
+Issue: "Wasabi disabled - recording not uploaded"
+Solution:
+  1. Check WASABI_ENABLED=true in .env
+  2. Verify WASABI_ACCESS_KEY_ID and WASABI_SECRET_ACCESS_KEY are set
+  3. Check Railway environment variables
+
+Issue: "Failed to upload to Wasabi" error
+Solution:
+  1. Verify Wasabi credentials are correct
+  2. Check bucket name matches WASABI_BUCKET_NAME
+  3. Verify bucket exists in Wasabi dashboard
+  4. Check IAM permissions in Wasabi
+
+Issue: "Invalid Wasabi endpoint"
+Solution:
+  1. WASABI_ENDPOINT must be: https://s3.wasabisys.com
+  2. For other regions, use: s3.{region}.wasabisys.com
+
+Issue: Recordings not appearing in database
+Solution:
+  1. Check database connection: node scripts/init-wasabi-db.js
+  2. Verify recording_url column exists: \d calls
+  3. Check call_charges table was created
+
+═══════════════════════════════════════════════════════════════════════════════
+✅ PRODUCTION CHECKLIST
+═══════════════════════════════════════════════════════════════════════════════
+
+Before going live, verify:
+
+□ Database
+  □ PostgreSQL running on Railway
+  □ All tables created (init-db.js ran)
+  □ Wasabi schema initialized (init-wasabi-db.js ran)
+  □ recording_url column exists on calls table
+  □ call_charges table created
+
+□ Environment Variables
+  □ JWT_SECRET is 32+ random characters
+  □ OPENAI_API_KEY is valid
+  □ EXOTEL credentials configured
+  □ WASABI credentials valid (test in console)
+  □ SMTP configured for OTP emails
+  □ CORS_ORIGIN matches frontend domain
+
+□ Wasabi Storage
+  □ Wasabi account created
+  □ Bucket created (caly-call-recordings)
+  □ Access key pair generated
+  □ Lifecycle policy set (auto-delete after 90 days)
+  □ Public URL accessible
+
+□ Application
+  □ Server starts without errors
+  □ Database connection successful
+  □ Wasabi connection tested
+  □ /api/health endpoint working
+  □ Recording upload tested with test call
+  □ Recording retrieval tested
+  □ Pre-signed URL generation working
+
+□ Monitoring
+  □ Logs configured (Winston logger)
+  □ Error tracking set up (Sentry optional)
+  □ Storage monitoring dashboard set up
+  □ Cost alerts configured
+
+═══════════════════════════════════════════════════════════════════════════════
+
+For more help: https://wasabi.com/support or check logs via Railway console

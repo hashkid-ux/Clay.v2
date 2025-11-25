@@ -5,6 +5,7 @@ const IntentDetector = require(resolve('agents/intentDetector'));
 const AgentOrchestrator = require(resolve('agents/orchestrator'));
 const logger = require(resolve('utils/logger'));
 const db = require(resolve('db/postgres'));
+const wasabiStorage = require(resolve('services/wasabiStorage'));
 const EventEmitter = require('events');
 
 // Session timeout (15 minutes of inactivity)
@@ -391,9 +392,42 @@ class CallSessionManager extends EventEmitter {
         .map(t => `${t.role}: ${t.content}`)
         .join('\n');
 
+      // Calculate call duration
+      const duration = Math.floor((Date.now() - session.startTime) / 1000);
+
+      // Upload recording to Wasabi if available
+      let recordingUrl = null;
+      if (session.audioBuffer && session.audioBuffer.length > 0) {
+        try {
+          recordingUrl = await wasabiStorage.uploadCallRecording(
+            callId,
+            session.audioBuffer,
+            'mp3'
+          );
+          logger.info('Call recording saved to Wasabi', { 
+            callId, 
+            url: recordingUrl,
+            size: session.audioBuffer.length 
+          });
+        } catch (error) {
+          logger.error('Failed to upload recording to Wasabi', {
+            callId,
+            error: error.message
+          });
+          // Continue even if upload fails - don't block call end
+        }
+      }
+
+      // Calculate charges
+      const durationMinutes = duration / 60;
+      const chargeAmount = durationMinutes * 30; // ₹30/minute
+
       await db.calls.update(callId, {
         transcript_full: fullTranscript,
-        end_ts: new Date()
+        end_ts: new Date(),
+        duration_seconds: duration,
+        recording_url: recordingUrl,
+        charge_amount: chargeAmount
       });
 
       // Clean up session resources
