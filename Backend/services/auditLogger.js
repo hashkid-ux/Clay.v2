@@ -5,7 +5,7 @@
  */
 
 const db = require('../db/postgres');
-const logger = require('./logger');
+const logger = require('../utils/logger');
 
 /**
  * Audit event types

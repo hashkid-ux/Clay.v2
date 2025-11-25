@@ -162,7 +162,15 @@ INSERT INTO clients (
   cancel_window_hours,
   active
 ) VALUES (
-  'Test Store',
+  'Demo Store',
+  'demo@caly.ai',
+  'demo-store.myshopify.com',
+  '+911234567890',
+  2000,
+  14,
+  24,
+  true
+) ON CONFLICT (email) DO NOTHING;
   'test@teststore.com',
   'test-store.myshopify.com',
   '+911234567890',
