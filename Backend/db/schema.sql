@@ -171,14 +171,6 @@ INSERT INTO clients (
   24,
   true
 ) ON CONFLICT (email) DO NOTHING;
-  'test@teststore.com',
-  'test-store.myshopify.com',
-  '+911234567890',
-  2000,
-  14,
-  24,
-  true
-);
 
 -- Create view for client dashboard (optional but useful)
 CREATE OR REPLACE VIEW client_dashboard_stats AS

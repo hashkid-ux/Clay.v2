@@ -4,7 +4,7 @@
  * Tracks performance, errors, and suspicious patterns
  */
 
-const logger = require('./logger');
+const logger = require('../utils/logger');
 
 /**
  * Request logger middleware
