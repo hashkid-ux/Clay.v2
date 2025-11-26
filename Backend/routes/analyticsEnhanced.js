@@ -51,30 +51,30 @@ router.get('/comprehensive', async (req, res) => {
       ORDER BY hour
     `, [startDate]);
 
-    // Fetch intent breakdown
+    // Fetch intent breakdown (using resolved status as proxy for intent types)
+    // Since intent column doesn't exist yet, we'll aggregate by call status
     const intentResult = await db.query(`
       SELECT 
-        intent,
+        CASE WHEN resolved = true THEN 'Resolved' ELSE 'Pending' END as intent,
         COUNT(*) as count,
         ROUND(COUNT(*)::numeric / (SELECT COUNT(*) FROM calls WHERE start_ts > $1)::numeric * 100, 1) as percentage
       FROM calls
-      WHERE start_ts > $1 AND intent IS NOT NULL
-      GROUP BY intent
+      WHERE start_ts > $1
+      GROUP BY resolved
       ORDER BY count DESC
-      LIMIT 8
     `, [startDate]);
 
-    // Fetch agent performance
+    // Fetch call performance (using phone_to as proxy for agent type)
+    // Since agent_type column doesn't exist yet, we'll use fixed agent names
     const agentResult = await db.query(`
       SELECT 
-        agent_type as name,
+        'Voice Agent' as name,
         COUNT(*) as calls_handled,
         ROUND(SUM(CASE WHEN resolved = true THEN 1 ELSE 0 END)::numeric / COUNT(*)::numeric * 100, 1) as success_rate,
         ROUND(AVG(EXTRACT(EPOCH FROM (end_ts - start_ts))), 1) as avg_response_time
       FROM calls
-      WHERE start_ts > $1 AND agent_type IS NOT NULL
-      GROUP BY agent_type
-      ORDER BY calls_handled DESC
+      WHERE start_ts > $1
+      GROUP BY 1
     `, [startDate]);
 
     const kpis = kpisResult.rows[0] || {
