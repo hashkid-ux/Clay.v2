@@ -152,14 +152,14 @@ const securityHeaders = (req, res, next) => {
     );
   }
 
-  // CSP
+  // 🔒 CSP - FIXED to remove unsafe-inline and unsafe-eval
   const policy = [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-    "style-src 'self' 'unsafe-inline'",
+    "script-src 'self' https://cdn.tailwindcss.com",
+    "style-src 'self' https://fonts.googleapis.com",
     "img-src 'self' data: https:",
-    "font-src 'self'",
-    "connect-src 'self' wss: https://api.openai.com https://api.exotel.com",
+    "font-src 'self' https://fonts.gstatic.com",
+    "connect-src 'self' wss: https://api.openai.com https://api.exotel.com https://calybackend-production.up.railway.app",
     "media-src 'self'",
     "object-src 'none'",
     "frame-ancestors 'none'",

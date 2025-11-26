@@ -189,7 +189,7 @@ export const AuthProvider = ({ children }) => {
         throw new Error(`Failed to fetch profile: ${response.status}`);
       }
     } catch (err) {
-      console.error('❌ [Auth] Profile fetch error:', err);
+      logger.error('❌ [Auth] Profile fetch error:', err);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -227,11 +227,11 @@ export const AuthProvider = ({ children }) => {
       }
 
       setToken(accessToken);
-      console.log('✅ [Auth] Login successful');
+      logger.debug('✅ [Auth] Login successful');
 
       return { success: true, user: data.user };
     } catch (err) {
-      console.error('❌ [Auth] Login error:', err);
+      logger.error('❌ [Auth] Login error:', err);
       setError(err.message);
       return { success: false, error: err.message };
     }
@@ -283,9 +283,9 @@ export const AuthProvider = ({ children }) => {
 
   const refreshToken = useCallback(async () => {
     // Prevent multiple concurrent refresh attempts
-    if (isRefreshing) {
-      console.log('⏳ [Auth] Refresh already in progress...');
-      return { success: false, error: 'Refresh in progress' };
+      if (isRefreshing) {
+        logger.debug('⏳ [Auth] Refresh already in progress...');
+        return { success: false, error: 'Refresh in progress' };
     }
 
     setIsRefreshing(true);
@@ -295,7 +295,7 @@ export const AuthProvider = ({ children }) => {
         throw new Error('No refresh token available');
       }
 
-      console.log('🔄 [Auth] Refreshing access token...');
+      logger.debug('🔄 [Auth] Refreshing access token...');
       const response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -312,10 +312,10 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('accessToken', newAccessToken);
       setToken(newAccessToken);
       
-      console.log('✅ [Auth] Token refreshed successfully');
+      logger.debug('✅ [Auth] Token refreshed successfully');
       return { success: true };
     } catch (err) {
-      console.error('❌ [Auth] Token refresh failed:', err);
+      logger.error('❌ [Auth] Token refresh failed:', err);
       // Clear auth on refresh failure
       logout();
       return { success: false, error: err.message };
@@ -343,7 +343,7 @@ export const AuthProvider = ({ children }) => {
         });
       }
     } catch (err) {
-      console.error('❌ [Auth] Logout error:', err);
+      logger.error('❌ [Auth] Logout error:', err);
     } finally {
       // Clear all auth data from localStorage
       localStorage.removeItem('accessToken');
@@ -353,7 +353,7 @@ export const AuthProvider = ({ children }) => {
       setUser(null);
       setToken(null);
       setError(null);
-      console.log('✅ [Auth] Logged out');
+      logger.debug('✅ [Auth] Logged out');
     }
   }, []);
 
