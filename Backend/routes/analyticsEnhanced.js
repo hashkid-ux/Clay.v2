@@ -54,12 +54,12 @@ router.get('/comprehensive', async (req, res) => {
     // Fetch intent breakdown
     const intentResult = await db.query(`
       SELECT 
-        current_intent as intent,
+        intent,
         COUNT(*) as count,
         ROUND(COUNT(*)::numeric / (SELECT COUNT(*) FROM calls WHERE start_ts > $1)::numeric * 100, 1) as percentage
       FROM calls
-      WHERE start_ts > $1 AND current_intent IS NOT NULL
-      GROUP BY current_intent
+      WHERE start_ts > $1 AND intent IS NOT NULL
+      GROUP BY intent
       ORDER BY count DESC
       LIMIT 8
     `, [startDate]);

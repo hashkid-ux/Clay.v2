@@ -33,40 +33,5 @@ CREATE INDEX IF NOT EXISTS idx_auth_methods_provider ON auth_methods(provider);
 CREATE INDEX IF NOT EXISTS idx_auth_methods_provider_id ON auth_methods(provider_id) WHERE provider_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_auth_methods_provider_email ON auth_methods(provider_email) WHERE provider_email IS NOT NULL;
 
--- Create audit log entry for auth_methods
-INSERT INTO audit_logs (client_id, event_type, payload, user_id, ip_address) 
-VALUES (
-  'system'::uuid, 
-  'migration_auth_methods', 
-  '{"version": "3.3", "description": "Account linking support"}'::jsonb, 
-  NULL, 
-  '0.0.0.0'
-)
-ON CONFLICT DO NOTHING;
-
--- Create initial auth_methods records for existing users
--- Link their existing oauth/email providers
-INSERT INTO auth_methods (user_id, provider, provider_id, provider_email, is_primary, linked_at)
-SELECT 
-  id,
-  'google',
-  google_id,
-  email,
-  true,
-  created_at
-FROM users
-WHERE google_id IS NOT NULL
-ON CONFLICT DO NOTHING;
-
--- Add email auth method for users with email/password
-INSERT INTO auth_methods (user_id, provider, provider_id, provider_email, is_primary, linked_at)
-SELECT 
-  id,
-  'email',
-  NULL,
-  email,
-  CASE WHEN google_id IS NULL THEN true ELSE false END,
-  created_at
-FROM users
-WHERE password_hash IS NOT NULL
-ON CONFLICT DO NOTHING;
+-- Note: Initial auth_methods records will be created by application code
+-- This ensures proper error handling and validation
