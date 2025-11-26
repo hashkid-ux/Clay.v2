@@ -8,12 +8,11 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- SESSION TABLE (for connect-pg-simple)
 -- ========================================
 CREATE TABLE IF NOT EXISTS "session" (
-  "sid" varchar NOT NULL COLLATE "default",
+  "sid" varchar PRIMARY KEY COLLATE "default",
   "sess" json NOT NULL,
   "expire" timestamp(6) NOT NULL
 ) WITH (OIDS=FALSE);
 
-ALTER TABLE IF EXISTS "session" ADD PRIMARY KEY ("sid");
 CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire");
 
 -- Clients table: Multi-tenant client configuration
@@ -181,13 +180,7 @@ CREATE INDEX idx_audit_logs_created_at ON audit_logs(created_at);
 CREATE INDEX idx_agent_metrics_client_date ON agent_metrics(client_id, date);
 
 -- Create updated_at trigger function
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION update_updated_at_column() RETURNS TRIGGER AS $$ BEGIN NEW.updated_at = NOW(); RETURN NEW; END; $$ LANGUAGE plpgsql;
 
 -- Drop existing triggers before recreating them
 DROP TRIGGER IF EXISTS update_calls_updated_at ON calls;
