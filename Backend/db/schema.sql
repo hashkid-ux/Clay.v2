@@ -180,8 +180,13 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_agent_metrics_client_date ON agent_metrics(client_id, date);
 
 -- Create updated_at trigger function
--- Using $func$ tags to uniquely identify dollar-quoted string boundaries
-CREATE OR REPLACE FUNCTION update_updated_at_column() RETURNS TRIGGER AS $func$ BEGIN NEW.updated_at = NOW(); RETURN NEW; END; $func$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION update_updated_at_column() 
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
 
 -- Drop existing triggers before recreating them
 DROP TRIGGER IF EXISTS update_calls_updated_at ON calls;
@@ -190,16 +195,16 @@ DROP TRIGGER IF EXISTS update_clients_updated_at ON clients;
 DROP TRIGGER IF EXISTS update_users_updated_at ON users;
 
 -- Add triggers to auto-update updated_at
-CREATE TRIGGER IF NOT EXISTS update_calls_updated_at BEFORE UPDATE ON calls
+CREATE TRIGGER update_calls_updated_at BEFORE UPDATE ON calls
 FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER IF NOT EXISTS update_actions_updated_at BEFORE UPDATE ON actions
+CREATE TRIGGER update_actions_updated_at BEFORE UPDATE ON actions
 FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER IF NOT EXISTS update_clients_updated_at BEFORE UPDATE ON clients
+CREATE TRIGGER update_clients_updated_at BEFORE UPDATE ON clients
 FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER IF NOT EXISTS update_users_updated_at BEFORE UPDATE ON users
+CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
 FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Insert sample client for testing (remove in production)
