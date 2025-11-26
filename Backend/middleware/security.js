@@ -6,6 +6,7 @@
 /**
  * HTTPS redirect middleware
  * Forces all HTTP requests to HTTPS (production only)
+ * 🔒 SECURITY FIX 5: Proper HTTPS enforcement even behind proxy
  */
 const httpsRedirect = (req, res, next) => {
   // Skip for health checks and internal requests
@@ -13,15 +14,14 @@ const httpsRedirect = (req, res, next) => {
     return next();
   }
 
-  // Only enforce in production and for non-HTTPS requests
-  if (process.env.NODE_ENV === 'production' && req.protocol !== 'https') {
-    // Check if behind proxy (trust X-Forwarded-Proto)
-    const proto = req.headers['x-forwarded-proto'] || req.protocol;
+  // Check if already HTTPS (handle proxy case with X-Forwarded-Proto)
+  const isSecure = req.protocol === 'https' || 
+                   req.headers['x-forwarded-proto'] === 'https';
 
-    if (proto !== 'https') {
-      const redirectUrl = `https://${req.get('host')}${req.url}`;
-      return res.redirect(301, redirectUrl);
-    }
+  // Enforce HTTPS in production
+  if (process.env.NODE_ENV === 'production' && !isSecure) {
+    const url = `https://${req.get('host')}${req.url}`;
+    return res.redirect(301, url);
   }
 
   next();
@@ -50,16 +50,17 @@ const hstsHeader = (req, res, next) => {
  * Content Security Policy (CSP) header
  * Controls which resources can be loaded
  * Prevents XSS attacks
+ * 🔒 SECURITY FIX 6: Removed unsafe-inline and unsafe-eval for production security
  */
 const cspHeader = (req, res, next) => {
-  // CSP policy: restrict content sources
+  // CSP policy: restrict content sources (no unsafe-inline in production)
   const policy = [
     "default-src 'self'", // Default: only same-origin
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval'", // Scripts
-    "style-src 'self' 'unsafe-inline'", // Styles
+    "script-src 'self' https://cdn.tailwindcss.com", // Scripts (removed unsafe-inline/eval)
+    "style-src 'self' https://fonts.googleapis.com", // Styles (removed unsafe-inline)
     "img-src 'self' data: https:", // Images
-    "font-src 'self'", // Fonts
-    "connect-src 'self' wss: https://api.openai.com https://api.exotel.com", // API calls
+    "font-src 'self' https://fonts.gstatic.com", // Fonts
+    "connect-src 'self' wss: https://api.openai.com https://api.exotel.com https://calybackend-production.up.railway.app", // API calls
     "media-src 'self'", // Audio/video
     "object-src 'none'", // Plugins
     "frame-ancestors 'none'", // No embedded frames

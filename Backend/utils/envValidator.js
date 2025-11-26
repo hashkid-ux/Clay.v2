@@ -13,6 +13,7 @@ class EnvValidator {
       PORT: { required: true, type: 'number' },
       DATABASE_URL: { required: true },
       JWT_SECRET: { required: true, minLength: 32 },
+      SESSION_SECRET: { required: true, minLength: 32 },
       ENCRYPTION_KEY: { required: true, minLength: 64 },
       OPENAI_API_KEY: { required: true },
 

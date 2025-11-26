@@ -6,6 +6,14 @@
 const { Pool } = require('pg');
 const logger = require('../utils/logger');
 
+// 🔒 SECURITY FIX 4: Validate DATABASE_URL exists at module load time
+if (!process.env.DATABASE_URL) {
+  throw new Error(
+    '❌ FATAL: DATABASE_URL environment variable must be set.\n' +
+    'Example: postgresql://user:password@host:port/database'
+  );
+}
+
 /**
  * Create optimized connection pool
  */

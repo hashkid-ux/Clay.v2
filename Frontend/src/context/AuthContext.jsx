@@ -3,6 +3,26 @@ import React, { createContext, useState, useCallback, useEffect } from 'react';
 
 export const AuthContext = createContext();
 
+// 🔒 SECURITY FIX 3: Logger that removes tokens from production logs
+const logger = {
+  debug: (msg, data) => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log(msg, data);
+    }
+    // Production: no logs to prevent token exposure
+  },
+  error: (msg, data) => {
+    if (process.env.NODE_ENV === 'development') {
+      console.error(msg, data);
+    }
+  },
+  warn: (msg, data) => {
+    if (process.env.NODE_ENV === 'development') {
+      console.warn(msg, data);
+    }
+  },
+};
+
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
 /**
@@ -18,7 +38,7 @@ const decodeJWT = (token) => {
     const decoded = JSON.parse(atob(payload));
     return decoded;
   } catch (err) {
-    console.error('Failed to decode JWT:', err);
+    logger.error('Failed to decode JWT:', err);
     return null;
   }
 };
@@ -45,7 +65,7 @@ const fetchWithTokenRefresh = async (url, options = {}, authContext = null) => {
 
   // If 401 and we have a refresh token, try to refresh
   if (response.status === 401 && authContext?.refreshToken) {
-    console.log('🔄 [Auth] Token expired, attempting refresh...');
+    logger.debug('🔄 [Auth] Token expired, attempting refresh...');
     const refreshResult = await authContext.refreshToken();
     
     if (refreshResult.success) {
@@ -77,7 +97,7 @@ export const AuthProvider = ({ children }) => {
         if (accessToken) {
           // ✅ PHASE 3 FIX 3.2: Check if token is expired BEFORE using it
           if (isTokenExpired(accessToken)) {
-            console.log('⏰ [Auth] Access token expired or expiring soon, attempting refresh...');
+            logger.debug('⏰ [Auth] Access token expired or expiring soon, attempting refresh...');
             
             if (refreshToken) {
               // Try to refresh the token
@@ -92,7 +112,7 @@ export const AuthProvider = ({ children }) => {
                   const data = await response.json();
                   const newAccessToken = data.token || data.accessToken;
                   localStorage.setItem('accessToken', newAccessToken);
-                  console.log('✅ [Auth] Token refreshed on app load');
+                  logger.debug('✅ [Auth] Token refreshed on app load');
                   
                   // Continue with fresh token
                   setToken(newAccessToken);
@@ -101,7 +121,7 @@ export const AuthProvider = ({ children }) => {
                   throw new Error('Token refresh failed');
                 }
               } catch (refreshErr) {
-                console.warn('⚠️  [Auth] Token refresh failed on app load:', refreshErr);
+                logger.warn('⚠️  [Auth] Token refresh failed on app load:', refreshErr);
                 // Clear auth and require re-login
                 localStorage.removeItem('accessToken');
                 localStorage.removeItem('refreshToken');
@@ -110,7 +130,7 @@ export const AuthProvider = ({ children }) => {
               }
             } else {
               // No refresh token available, require re-login
-              console.log('🔓 [Auth] No refresh token available, clearing session');
+              logger.debug('🔓 [Auth] No refresh token available, clearing session');
               localStorage.removeItem('accessToken');
               localStorage.removeItem('user');
               setLoading(false);
@@ -118,7 +138,7 @@ export const AuthProvider = ({ children }) => {
           } else {
             // Token is still valid
             setToken(accessToken);
-            console.log('✅ [Auth] Valid token found in localStorage, fetching profile...');
+            logger.debug('✅ [Auth] Valid token found in localStorage, fetching profile...');
             await fetchUserProfile(accessToken);
           }
         } else if (userData) {
@@ -130,7 +150,7 @@ export const AuthProvider = ({ children }) => {
           setLoading(false);
         }
       } catch (err) {
-        console.error('❌ [Auth] Initialization error:', err);
+        logger.error('❌ [Auth] Initialization error:', err);
         setLoading(false);
       }
     };
@@ -140,7 +160,7 @@ export const AuthProvider = ({ children }) => {
 
   const fetchUserProfile = useCallback(async (accessToken) => {
     try {
-      console.log('🔗 [Auth] Fetching user profile...');
+      logger.debug('🔗 [Auth] Fetching user profile...');
       
       const response = await fetch(`${API_BASE_URL}/api/auth/profile`, {
         headers: { Authorization: `Bearer ${accessToken}` }
@@ -148,7 +168,7 @@ export const AuthProvider = ({ children }) => {
 
       if (response.ok) {
         const data = await response.json();
-        console.log('✅ [Auth] Profile fetched successfully:', {
+        logger.debug('✅ [Auth] Profile fetched successfully:', {
           userId: data.user.id,
           email: data.user.email,
         });
@@ -157,7 +177,7 @@ export const AuthProvider = ({ children }) => {
         setError(null);
       } else if (response.status === 401) {
         // Token invalid or expired
-        console.warn('⚠️  [Auth] Token expired or invalid');
+        logger.warn('⚠️  [Auth] Token expired or invalid');
         localStorage.removeItem('accessToken');
         localStorage.removeItem('refreshToken');
         localStorage.removeItem('user');

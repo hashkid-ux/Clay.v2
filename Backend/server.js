@@ -111,7 +111,34 @@ const {
 
 // Middleware
 app.use(helmet());
-app.use(cors());
+
+// 🔒 SECURITY FIX 1: Proper CORS configuration - whitelist allowed origins
+const allowedOrigins = [
+  process.env.FRONTEND_URL || 'http://localhost:3000',
+  process.env.FRONTEND_URL_ALT || '',
+].filter(Boolean);
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('CORS policy: origin not allowed'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  maxAge: 3600,
+}));
+
+// 🔒 SECURITY FIX 2: Protect SESSION_SECRET - fail fast if not set
+if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32) {
+  throw new Error(
+    '❌ FATAL: SESSION_SECRET environment variable must be set to 32+ character string.\n' +
+    'Generate one: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"'
+  );
+}
 
 // ✅ Production Session Storage - PostgreSQL (replaces MemoryStore)
 app.use(
@@ -121,18 +148,18 @@ app.use(
       tableName: 'session', // PostgreSQL will create this table automatically
       ttl: 24 * 60 * 60, // 24 hours in seconds
     }),
-    secret: process.env.SESSION_SECRET || 'caly-oauth-session-secret-key',
+    secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
     cookie: {
-      secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+      secure: true, // HTTPS only - no HTTP in production
       httpOnly: true,
-      sameSite: 'lax',
+      sameSite: 'strict',
       maxAge: 24 * 60 * 60 * 1000, // 24 hours in milliseconds
     },
   })
 );
-logger.info('✅ Session store configured (PostgreSQL - production-ready)');
+logger.info('✅ Session store configured (PostgreSQL - production-ready, secure CORS whitelist)');
 
 // Passport initialization
 app.use(passport.initialize());
