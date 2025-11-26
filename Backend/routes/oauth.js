@@ -114,7 +114,13 @@ router.get('/profile', async (req, res) => {
     }
 
     const token = authHeader.replace('Bearer ', '');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+    // ✅ PHASE 4 FIX 4.1: Use JWT_SECRET from environment (no hardcoded fallback)
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) {
+      logger.error('JWT_SECRET not configured');
+      return res.status(500).json({ error: 'Server configuration error' });
+    }
+    const decoded = jwt.verify(token, jwtSecret);
 
     const user = await db.query(
       `SELECT id, name, email, role, is_verified, client_id, created_at 
@@ -155,7 +161,13 @@ router.post('/verify-token', (req, res) => {
       return res.status(400).json({ success: false, error: 'No token provided' });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+    // ✅ PHASE 4 FIX 4.1: Use JWT_SECRET from environment (no hardcoded fallback)
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) {
+      logger.error('JWT_SECRET not configured');
+      return res.status(500).json({ error: 'Server configuration error' });
+    }
+    const decoded = jwt.verify(token, jwtSecret);
     res.json({ 
       success: true, 
       userId: decoded.userId,
@@ -179,7 +191,13 @@ router.post('/refresh', (req, res) => {
       return res.status(400).json({ error: 'No token provided' });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+    // ✅ PHASE 4 FIX 4.1: Use JWT_SECRET from environment (no hardcoded fallback)
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) {
+      logger.error('JWT_SECRET not configured');
+      return res.status(500).json({ error: 'Server configuration error' });
+    }
+    const decoded = jwt.verify(token, jwtSecret);
     
     const newToken = jwt.sign(
       {
@@ -188,7 +206,7 @@ router.post('/refresh', (req, res) => {
         clientId: decoded.clientId,
         role: decoded.role,
       },
-      process.env.JWT_SECRET || 'your-secret-key',
+      jwtSecret,
       { expiresIn: '24h' }
     );
 

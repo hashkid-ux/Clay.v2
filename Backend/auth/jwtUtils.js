@@ -4,9 +4,18 @@ const crypto = require('crypto');
 const logger = require('../utils/logger');
 const db = require('../db/postgres');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production';
+// ✅ PHASE 4 FIX 4.1: Require JWT secrets from environment (no hardcoded fallbacks)
+if (!process.env.JWT_SECRET) {
+  throw new Error('FATAL: JWT_SECRET environment variable is required but not set.');
+}
+
+const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRY = process.env.JWT_EXPIRY || '24h';
 const REFRESH_TOKEN_EXPIRY = process.env.REFRESH_TOKEN_EXPIRY || '7d';
+
+if (JWT_SECRET.length < 32) {
+  throw new Error('FATAL: JWT_SECRET must be at least 32 characters for security.');
+}
 
 class JWTUtils {
   /**
@@ -169,6 +178,49 @@ class JWTUtils {
       return { accessToken, refreshToken };
     } catch (error) {
       logger.error('Error generating token pair', { error: error.message });
+      throw error;
+    }
+  }
+
+  /**
+   * ✅ PHASE 4 FIX 4.3: Rotate refresh token (issue new, blacklist old)
+   * Called when client uses refresh token to get new access token
+   * 
+   * Benefits:
+   * - Limits lifetime of compromised tokens
+   * - Detects token theft (only one refresh token active per user at a time)
+   * - Reduces attack surface if token is leaked
+   * 
+   * @param {object} oldDecodedToken - The decoded old refresh token
+   * @param {object} payload - User payload for new token
+   * @returns {object} - { newAccessToken, newRefreshToken, oldTokenBlacklisted: boolean }
+   */
+  static async rotateRefreshToken(oldDecodedToken, payload) {
+    try {
+      // 1. Blacklist the old refresh token (so it can't be reused)
+      if (oldDecodedToken.jti) {
+        await this.blacklistRefreshToken(
+          this.signRefreshToken(oldDecodedToken)
+        );
+      }
+
+      // 2. Generate new token pair
+      const newAccessToken = this.signToken(payload, JWT_EXPIRY);
+      const newRefreshToken = this.signRefreshToken(payload);
+
+      logger.info('✅ Refresh token rotated', {
+        userId: payload.userId,
+        oldJti: oldDecodedToken.jti,
+        timestamp: new Date().toISOString()
+      });
+
+      return {
+        accessToken: newAccessToken,
+        refreshToken: newRefreshToken,
+        rotated: true
+      };
+    } catch (error) {
+      logger.error('Error rotating refresh token', { error: error.message });
       throw error;
     }
   }

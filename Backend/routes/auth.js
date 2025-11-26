@@ -199,7 +199,13 @@ router.post('/login', async (req, res) => {
     );
 
     if (userResult.rows.length === 0) {
-      logger.warn('Login attempt - user not found', { email, ip: req.ip });
+      // ✅ PHASE 4 FIX 4.5: Track failed login (user not found)
+      logger.warn('❌ Login attempt - user not found', { email, ip: req.ip });
+      await db.query(
+        `INSERT INTO audit_logs (client_id, event_type, payload, ip_address)
+         VALUES ('00000000-0000-0000-0000-000000000000'::uuid, 'failed_login_user_not_found', $1, $2)`,
+        [JSON.stringify({ email }), req.ip]
+      ).catch(err => logger.debug('Failed to log', { error: err.message }));
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
@@ -220,7 +226,13 @@ router.post('/login', async (req, res) => {
     // Verify password
     const isPasswordValid = await PasswordUtils.verifyPassword(password, user.password_hash);
     if (!isPasswordValid) {
-      logger.warn('Login attempt - invalid password', { email, ip: req.ip });
+      // ✅ PHASE 4 FIX 4.5: Track failed login (wrong password)
+      logger.warn('❌ Login attempt - invalid password', { email, ip: req.ip });
+      await db.query(
+        `INSERT INTO audit_logs (client_id, event_type, payload, user_id, ip_address)
+         VALUES ($1, 'failed_login_invalid_password', $2, $3, $4)`,
+        [user.client_id, JSON.stringify({ email }), user.id, req.ip]
+      ).catch(err => logger.debug('Failed to log', { error: err.message }));
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
@@ -241,12 +253,19 @@ router.post('/login', async (req, res) => {
       [user.id]
     );
 
+    // ✅ PHASE 4 FIX 4.5: Log successful login
     logger.info('✅ User logged in successfully', { 
       userId: user.id, 
       email, 
       clientId: user.client_id,
       ip: req.ip 
     });
+
+    await db.query(
+      `INSERT INTO audit_logs (client_id, event_type, payload, user_id, ip_address)
+       VALUES ($1, 'login_success', $2, $3, $4)`,
+      [user.client_id, JSON.stringify({ email }), user.id, req.ip]
+    ).catch(err => logger.debug('Failed to log', { error: err.message }));
 
     res.json({
       message: 'Login successful',
@@ -285,7 +304,7 @@ router.post('/refresh', async (req, res) => {
     // ✅ PHASE 2 FIX 2.1: Check if token is blacklisted (on logout)
     const decoded = await JWTUtils.verifyRefreshToken(refreshToken);
 
-    // Generate new access token
+    // ✅ PHASE 4 FIX 4.3: Rotate refresh token (issue new, blacklist old)
     const tokenPayload = {
       userId: decoded.userId,
       email: decoded.email,
@@ -294,16 +313,20 @@ router.post('/refresh', async (req, res) => {
       companyName: decoded.companyName
     };
 
-    const newAccessToken = JWTUtils.signToken(tokenPayload);
+    // Rotate token: blacklist old, issue new
+    const { accessToken: newAccessToken, refreshToken: newRefreshToken } = 
+      await JWTUtils.rotateRefreshToken(decoded, tokenPayload);
 
-    logger.info('✅ Token refreshed successfully', {
+    logger.info('✅ Token refreshed successfully (rotated)', {
       userId: decoded.userId,
-      email: decoded.email
+      email: decoded.email,
+      tokenRotated: true
     });
 
     res.json({
       token: newAccessToken,
       accessToken: newAccessToken,
+      refreshToken: newRefreshToken,
       expiresIn: '24h'
     });
 
@@ -946,6 +969,108 @@ router.post('/check-email-link', async (req, res) => {
     logger.error('Error checking email link', { error: error.message });
     // Return generic response on error
     res.json({ success: true, available: false });
+  }
+});
+
+/**
+ * ✅ PHASE 4 FIX 4.4: Resend Verification Email
+ * POST /api/auth/resend-verification-email
+ * 
+ * Purpose:
+ * - Allow users to request a new OTP if they didn't receive one
+ * - Rate limited to prevent spam
+ * - Returns generic success message (doesn't reveal if email exists)
+ * 
+ * Body: { email }
+ * Returns: { success: true, message: '...' }
+ */
+router.post('/resend-verification-email', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email || !email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
+      return res.status(400).json({ error: 'Valid email address required' });
+    }
+
+    // Generic response to prevent email enumeration
+    const genericResponse = {
+      success: true,
+      message: 'If that email exists and needs verification, a new OTP has been sent.'
+    };
+
+    // Find user by email
+    const userResult = await db.query(
+      'SELECT id, email, is_active FROM users WHERE LOWER(email) = LOWER($1)',
+      [email.toLowerCase()]
+    );
+
+    if (!userResult.rows.length) {
+      // User doesn't exist - return generic response
+      return res.json(genericResponse);
+    }
+
+    const user = userResult.rows[0];
+
+    // If user already verified, no need to send OTP
+    if (user.is_active) {
+      // Still return generic response to not leak info
+      return res.json(genericResponse);
+    }
+
+    // Generate new OTP
+    const otp = PasswordUtils.generateOTP();
+    const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    // Update OTP in database (within transaction to be atomic)
+    const updateResult = await db.query(
+      `UPDATE users 
+       SET otp_code = $1, otp_expires_at = $2 
+       WHERE id = $3 
+       RETURNING id, email`,
+      [otp, otpExpiresAt, user.id]
+    );
+
+    if (!updateResult.rows.length) {
+      logger.error('Failed to update OTP for user', { userId: user.id });
+      return res.json(genericResponse); // Still return generic response
+    }
+
+    // Send OTP email
+    try {
+      const emailResult = await emailService.sendOTPEmail(email, otp);
+      if (!emailResult.success) {
+        logger.warn('Failed to send verification email', {
+          email,
+          error: emailResult.error,
+        });
+        // Don't fail - user can try again
+      } else {
+        logger.info('✅ Verification email resent', { email, userId: user.id });
+      }
+    } catch (emailError) {
+      logger.error('Error sending verification email', {
+        email,
+        error: emailError.message
+      });
+      // Don't fail - return generic response
+    }
+
+    // Log audit event
+    await db.query(
+      `INSERT INTO audit_logs (client_id, event_type, payload, user_id, ip_address)
+       VALUES ($1, 'verification_email_resent', $2, $3, $4)`,
+      [user.id, JSON.stringify({ email }), user.id, req.ip]
+    );
+
+    res.json(genericResponse);
+
+  } catch (error) {
+    logger.error('Error in resend-verification-email', { error: error.message });
+    // Return generic response even on error
+    res.json({
+      success: true,
+      message: 'If that email exists and needs verification, a new OTP has been sent.'
+    });
   }
 });
 

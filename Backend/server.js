@@ -445,6 +445,28 @@ async function startApplication() {
         });
       }
 
+      // ✅ PHASE 4 FIX 4.2: Schedule database cleanup job
+      // Runs every 6 hours to clean up expired OTP, password reset tokens, and blacklisted tokens
+      const CleanupService = require('./services/cleanupService');
+      const CLEANUP_INTERVAL = 6 * 60 * 60 * 1000; // 6 hours in milliseconds
+      
+      setInterval(async () => {
+        try {
+          const result = await CleanupService.cleanupAll();
+          if (result.success) {
+            logger.info('✅ Scheduled database cleanup completed', {
+              totalCleaned: result.totalCleaned,
+              timestamp: new Date().toISOString()
+            });
+          }
+        } catch (error) {
+          logger.error('❌ Scheduled database cleanup failed', {
+            error: error.message,
+            timestamp: new Date().toISOString()
+          });
+        }
+      }, CLEANUP_INTERVAL);
+
       logger.info('🎉 Application ready to handle requests');
     });
 
