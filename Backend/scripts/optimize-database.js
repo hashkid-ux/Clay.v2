@@ -7,6 +7,45 @@
 const db = require('../db/postgres');
 const logger = require('../utils/logger');
 
+async function createOptimizedIndexes() {
+  console.log('\n🔧 Creating Performance Indexes\n');
+
+  try {
+    const indexes = [
+      { name: 'idx_calls_client_created', query: 'CREATE INDEX IF NOT EXISTS idx_calls_client_created ON calls(client_id, created_at DESC);' },
+      { name: 'idx_calls_resolved_client', query: 'CREATE INDEX IF NOT EXISTS idx_calls_resolved_client ON calls(client_id, resolved, created_at DESC);' },
+      { name: 'idx_session_expire', query: 'CREATE INDEX IF NOT EXISTS idx_session_expire ON "session"(expire);' },
+      { name: 'idx_actions_client_call', query: 'CREATE INDEX IF NOT EXISTS idx_actions_client_call ON actions(client_id, call_id);' },
+      { name: 'idx_entities_call', query: 'CREATE INDEX IF NOT EXISTS idx_entities_call ON entities(call_id);' }
+    ];
+
+    for (const index of indexes) {
+      try {
+        await db.query(index.query);
+        console.log(`  ✅ ${index.name}`);
+      } catch (error) {
+        console.log(`  ⚠️  ${index.name}: ${error.message}`);
+      }
+    }
+
+    // Analyze tables
+    console.log('\n📊 Analyzing tables for query planner...\n');
+    const tables = ['calls', 'actions', 'entities', 'session', 'users', 'clients'];
+    for (const table of tables) {
+      try {
+        await db.query(`ANALYZE ${table};`);
+        console.log(`  ✅ Analyzed: ${table}`);
+      } catch (error) {
+        console.log(`  ⚠️  ${table}: ${error.message}`);
+      }
+    }
+
+    console.log('\n✅ Index creation and analysis complete!\n');
+  } catch (error) {
+    logger.error('Error creating indexes:', error);
+  }
+}
+
 async function analyzeIndexes() {
   console.log('\n📊 Database Index Analysis\n');
 
@@ -179,17 +218,21 @@ async function optimizationRecommendations() {
 }
 
 async function runOptimizations() {
-  console.log('\n🚀 Running Database Optimization Analysis\n');
+  console.log('\n🚀 Running Database Optimization\n');
   console.log('═════════════════════════════════════════════════════════');
 
   try {
+    // First create indexes (CRITICAL)
+    await createOptimizedIndexes();
+    
+    // Then analyze
     await analyzeIndexes();
     await analyzeTableSizes();
     await analyzeSlowQueries();
     await optimizationRecommendations();
 
     console.log('\n═════════════════════════════════════════════════════════');
-    console.log('✓ Database analysis complete\n');
+    console.log('✓ Database optimization complete\n');
 
   } catch (error) {
     console.error('Fatal error during optimization:', error);
@@ -205,6 +248,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  createOptimizedIndexes,
   analyzeIndexes,
   analyzeTableSizes,
   analyzeSlowQueries,

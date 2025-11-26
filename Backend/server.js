@@ -416,6 +416,18 @@ async function startApplication() {
     logger.info('🚀 Starting Caly Voice Agent...');
     await initDatabaseAndMigrations();
 
+    // Step 1.5: Run database optimizations (create indexes, analyze tables)
+    try {
+      logger.info('📊 Running database optimizations...');
+      const { createOptimizedIndexes } = require('./scripts/optimize-database');
+      await createOptimizedIndexes();
+      logger.info('✅ Database optimizations completed');
+    } catch (error) {
+      logger.warn('⚠️  Database optimization warning (not critical)', {
+        error: error.message,
+      });
+    }
+
     // Step 2: Setup graceful shutdown handlers
     const shutdown = new GracefulShutdown(server, db, null);
     shutdown.attachHandlers();
