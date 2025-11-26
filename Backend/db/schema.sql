@@ -58,13 +58,22 @@ CREATE TABLE users (
   otp_expires_at TIMESTAMP WITH TIME ZONE,
   is_active BOOLEAN DEFAULT true,
   last_login TIMESTAMP WITH TIME ZONE,
+  -- Google OAuth columns
+  google_id VARCHAR(255) UNIQUE,
+  google_refresh_token TEXT,
+  is_verified BOOLEAN DEFAULT false,
+  verified_at TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_email_lower ON users(LOWER(email));
 CREATE INDEX idx_users_client_id ON users(client_id);
 CREATE INDEX idx_users_created_at ON users(created_at);
+CREATE INDEX idx_users_google_id ON users(google_id) WHERE google_id IS NOT NULL;
+CREATE INDEX idx_users_last_login ON users(last_login);
+CREATE INDEX idx_users_is_active ON users(is_active);
 
 -- Calls table: Main call records (per client)
 CREATE TABLE calls (
