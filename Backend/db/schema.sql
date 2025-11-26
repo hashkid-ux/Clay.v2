@@ -4,6 +4,18 @@
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- ========================================
+-- SESSION TABLE (for connect-pg-simple)
+-- ========================================
+CREATE TABLE IF NOT EXISTS "session" (
+  "sid" varchar NOT NULL COLLATE "default",
+  "sess" json NOT NULL,
+  "expire" timestamp(6) NOT NULL
+) WITH (OIDS=FALSE);
+
+ALTER TABLE IF EXISTS "session" ADD PRIMARY KEY ("sid");
+CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire");
+
 -- Clients table: Multi-tenant client configuration
 CREATE TABLE clients (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -74,6 +86,13 @@ CREATE INDEX idx_users_created_at ON users(created_at);
 CREATE INDEX idx_users_google_id ON users(google_id) WHERE google_id IS NOT NULL;
 CREATE INDEX idx_users_last_login ON users(last_login);
 CREATE INDEX idx_users_is_active ON users(is_active);
+
+-- Ensure OAuth columns exist (safe for existing databases)
+ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS google_id VARCHAR(255) UNIQUE;
+ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS google_refresh_token TEXT;
+ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT false;
+ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS verified_at TIMESTAMP WITH TIME ZONE;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id_alt ON users(google_id) WHERE google_id IS NOT NULL;
 
 -- Calls table: Main call records (per client)
 CREATE TABLE calls (
@@ -168,7 +187,13 @@ BEGIN
     NEW.updated_at = NOW();
     RETURN NEW;
 END;
-$$ language 'plpgsql';
+$$ LANGUAGE plpgsql;
+
+-- Drop existing triggers before recreating them
+DROP TRIGGER IF EXISTS update_calls_updated_at ON calls;
+DROP TRIGGER IF EXISTS update_actions_updated_at ON actions;
+DROP TRIGGER IF EXISTS update_clients_updated_at ON clients;
+DROP TRIGGER IF EXISTS update_users_updated_at ON users;
 
 -- Add triggers to auto-update updated_at
 CREATE TRIGGER update_calls_updated_at BEFORE UPDATE ON calls
@@ -178,6 +203,9 @@ CREATE TRIGGER update_actions_updated_at BEFORE UPDATE ON actions
 FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_clients_updated_at BEFORE UPDATE ON clients
+FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
 FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Insert sample client for testing (remove in production)
