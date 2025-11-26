@@ -28,81 +28,49 @@ const setupSwagger = require(resolve('docs/swagger'));
 // Load Passport strategies
 require('./config/passport-google');
 
-// Load migration system
+// Load robust database initialization
+const { initializeDatabase } = require('./db/initDatabase');
 const { runMigrations } = require('./db/migrationsystem');
 
 /**
- * 🔒 AUTO-INITIALIZE DATABASE SAFELY
- * ✅ Creates tables if they don't exist
- * ✅ No data loss (idempotent)
- * ✅ Handles errors gracefully
- * ✅ Automatic on every app start
+ * 🔒 INITIALIZE DATABASE WITH ROBUST ERROR HANDLING
+ * ✅ Proper SQL parsing (not naive semicolon split)
+ * ✅ Table existence validation
+ * ✅ Comprehensive error logging
+ * ✅ Idempotent (safe to run multiple times)
+ * ✅ Runs migrations AFTER schema validation
  */
-async function initializeDatabase() {
+async function initDatabaseAndMigrations() {
   try {
-    logger.info('📄 Starting database initialization...');
+    logger.info('🚀 PHASE 1: Initializing core database schema...');
 
-    // Step 1: Test connection
-    logger.info('🔗 Testing database connection...');
-    await db.query('SELECT NOW()');
-    logger.info('✅ Database connection established');
+    // Use robust initialization from initDatabase.js
+    await initializeDatabase();
 
-    // Step 2: Read schema file
-    const schemaPath = path.join(__dirname, 'db/schema.sql');
-    if (!fs.existsSync(schemaPath)) {
-      logger.warn('⚠️  schema.sql not found at ' + schemaPath);
-      return;
-    }
+    logger.info('🚀 PHASE 2: Running database migrations...');
 
-    const schema = fs.readFileSync(schemaPath, 'utf8');
-
-    // Step 3: Execute schema statements one by one (idempotent)
-    const statements = schema
-      .split(';')
-      .map(s => s.trim())
-      .filter(s => s && !s.startsWith('--') && !s.startsWith('/*'));
-
-    let successCount = 0;
-    let skipCount = 0;
-
-    for (const statement of statements) {
-      if (!statement) continue;
-
-      try {
-        await db.query(statement);
-        successCount++;
-      } catch (error) {
-        // Ignore "already exists" errors - expected during init
-        if (
-          error.message.includes('already exists') ||
-          error.message.includes('does not exist') ||
-          error.code === '42P07' || // TABLE_ALREADY_EXISTS
-          error.code === '42701'    // COLUMN_ALREADY_EXISTS
-        ) {
-          skipCount++;
-          logger.debug('⏭️  ' + error.message.split('\n')[0]);
-        } else {
-          // Log but don't crash on minor errors
-          logger.warn('⚠️  Schema execution warning: ' + error.message.split('\n')[0]);
-        }
-      }
-    }
-
-    logger.info(`✅ Database initialization complete (${successCount} executed, ${skipCount} skipped)`);
-    
-    // Step 4: Run migrations
-    logger.info('🔄 Running database migrations...');
+    // Run migrations AFTER schema is validated
     const migrationsSuccess = await runMigrations();
+
     if (!migrationsSuccess) {
-      logger.warn('⚠️  Some migrations may have failed, but continuing...');
+      logger.warn(
+        '⚠️  Some migrations had issues, but core schema is valid'
+      );
     }
-    
+
+    logger.info('✅ ALL DATABASE INITIALIZATION COMPLETE');
     return true;
   } catch (error) {
-    logger.error('❌ Database initialization failed', {
+    logger.error('❌ CRITICAL: Database initialization failed', {
       error: error.message,
       code: error.code,
+      stack: error.stack,
     });
+
+    logger.error(
+      '⚠️  ATTENTION: Database may not be ready. Check logs for details.'
+    );
+
     throw error;
   }
 }
@@ -435,7 +403,7 @@ async function startApplication() {
   try {
     // Step 1: Initialize database (must be first!)
     logger.info('🚀 Starting Caly Voice Agent...');
-    await initializeDatabase();
+    await initDatabaseAndMigrations();
 
     // Step 2: Setup graceful shutdown handlers
     const shutdown = new GracefulShutdown(server, db, null);

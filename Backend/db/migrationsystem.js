@@ -1,12 +1,18 @@
 /**
  * Database Migration System
  * Handles version control for database schema changes
+ * 
+ * ✅ Uses proper SQL parser from initDatabase
+ * ✅ Respects multi-line statements
+ * ✅ Handles dollar quotes and comments
+ * ✅ Tracks applied migrations to avoid re-running
  */
 
 const fs = require('fs');
 const path = require('path');
 const db = require('./postgres');
 const logger = require('../utils/logger');
+const { parseSqlStatements } = require('./initDatabase');
 
 /**
  * Initialize migrations table
@@ -41,14 +47,15 @@ async function getAppliedMigrations() {
 }
 
 /**
- * Apply a single migration
+ * Apply a single migration with proper SQL parsing
+ * Uses parseSqlStatements instead of naive split(';')
  */
 async function applyMigration(name, sql) {
   try {
     logger.info(`📝 Applying migration: ${name}`);
     
-    // Split by semicolon and execute each statement
-    const statements = sql.split(';').filter(stmt => stmt.trim());
+    // Use proper SQL parser that respects multi-line statements
+    const statements = parseSqlStatements(sql);
     
     let statementCount = 0;
     for (const statement of statements) {
@@ -57,15 +64,22 @@ async function applyMigration(name, sql) {
           await db.query(statement);
           statementCount++;
         } catch (stmtError) {
-          // Log but continue - some statements may fail due to IF NOT EXISTS
-          if (!stmtError.message.includes('already exists')) {
+          // Determine if error is ignorable
+          const ignorable =
+            stmtError.message.includes('already exists') ||
+            stmtError.code === '42P07' || // TABLE_ALREADY_EXISTS
+            stmtError.code === '42701' || // COLUMN_ALREADY_EXISTS
+            stmtError.code === '42P13' || // CONSTRAINT_ALREADY_EXISTS
+            stmtError.code === '42P14'; // COLUMN_ALREADY_DEFINED
+
+          if (!ignorable) {
             logger.warn(`⚠️  Statement in ${name} returned warning: ${stmtError.message.split('\n')[0]}`);
           }
         }
       }
     }
     
-    // Record migration as applied
+    // Record migration as applied (only if not already recorded)
     await db.query(
       'INSERT INTO migrations (name) VALUES ($1) ON CONFLICT DO NOTHING',
       [name]
