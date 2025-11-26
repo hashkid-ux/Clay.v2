@@ -54,13 +54,13 @@ CREATE TABLE IF NOT EXISTS refresh_token_blacklist (
 );
 
 -- Create indexes for performance
-CREATE INDEX idx_company_users_client_id ON company_users(client_id);
-CREATE INDEX idx_company_users_email ON company_users(email);
-CREATE INDEX idx_api_keys_client_id ON api_keys(client_id);
-CREATE INDEX idx_api_keys_key ON api_keys(key);
-CREATE INDEX idx_email_verifications_user_id ON email_verifications(user_id);
-CREATE INDEX idx_refresh_token_blacklist_user_id ON refresh_token_blacklist(user_id);
+CREATE INDEX IF NOT EXISTS idx_company_users_client_id ON company_users(client_id);
+CREATE INDEX IF NOT EXISTS idx_company_users_email ON company_users(email);
+CREATE INDEX IF NOT EXISTS idx_api_keys_client_id ON api_keys(client_id);
+CREATE INDEX IF NOT EXISTS idx_api_keys_key ON api_keys(key);
+CREATE INDEX IF NOT EXISTS idx_email_verifications_user_id ON email_verifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_refresh_token_blacklist_user_id ON refresh_token_blacklist(user_id);
 
 -- Update clients table to track creator
-ALTER TABLE clients ADD COLUMN created_by UUID REFERENCES company_users(id) ON DELETE SET NULL;
-CREATE INDEX idx_clients_created_by ON clients(created_by);
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES company_users(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_clients_created_by ON clients(created_by);
