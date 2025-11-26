@@ -5,6 +5,40 @@ export const AuthContext = createContext();
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
+/**
+ * ✅ PHASE 3 FIX 3.2: Decode JWT token to check expiry
+ * Simple JWT decoder without external dependencies
+ */
+const decodeJWT = (token) => {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    
+    const payload = parts[1];
+    const decoded = JSON.parse(atob(payload));
+    return decoded;
+  } catch (err) {
+    console.error('Failed to decode JWT:', err);
+    return null;
+  }
+};
+
+/**
+ * ✅ PHASE 3 FIX 3.2: Check if token is expired
+ * Returns true if token is expired or will expire within 5 minutes
+ */
+const isTokenExpired = (token) => {
+  const decoded = decodeJWT(token);
+  if (!decoded || !decoded.exp) return true;
+  
+  // Add 5-minute buffer to proactively refresh before actual expiry
+  const expiryTime = decoded.exp * 1000; // Convert to milliseconds
+  const bufferTime = 5 * 60 * 1000; // 5 minutes in milliseconds
+  const now = Date.now();
+  
+  return now >= (expiryTime - bufferTime);
+};
+
 // Wrapper around fetch to add automatic token refresh on 401
 const fetchWithTokenRefresh = async (url, options = {}, authContext = null) => {
   let response = await fetch(url, options);
@@ -37,15 +71,58 @@ export const AuthProvider = ({ children }) => {
     const initializeAuth = async () => {
       try {
         const accessToken = localStorage.getItem('accessToken');
+        const refreshToken = localStorage.getItem('refreshToken');
         const userData = localStorage.getItem('user');
         
         if (accessToken) {
-          setToken(accessToken);
-          console.log('✅ [Auth] Token found in localStorage, fetching profile...');
-          // Fetch user profile from token
-          await fetchUserProfile(accessToken);
+          // ✅ PHASE 3 FIX 3.2: Check if token is expired BEFORE using it
+          if (isTokenExpired(accessToken)) {
+            console.log('⏰ [Auth] Access token expired or expiring soon, attempting refresh...');
+            
+            if (refreshToken) {
+              // Try to refresh the token
+              try {
+                const response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ refreshToken })
+                });
+
+                if (response.ok) {
+                  const data = await response.json();
+                  const newAccessToken = data.token || data.accessToken;
+                  localStorage.setItem('accessToken', newAccessToken);
+                  console.log('✅ [Auth] Token refreshed on app load');
+                  
+                  // Continue with fresh token
+                  setToken(newAccessToken);
+                  await fetchUserProfile(newAccessToken);
+                } else {
+                  throw new Error('Token refresh failed');
+                }
+              } catch (refreshErr) {
+                console.warn('⚠️  [Auth] Token refresh failed on app load:', refreshErr);
+                // Clear auth and require re-login
+                localStorage.removeItem('accessToken');
+                localStorage.removeItem('refreshToken');
+                localStorage.removeItem('user');
+                setLoading(false);
+              }
+            } else {
+              // No refresh token available, require re-login
+              console.log('🔓 [Auth] No refresh token available, clearing session');
+              localStorage.removeItem('accessToken');
+              localStorage.removeItem('user');
+              setLoading(false);
+            }
+          } else {
+            // Token is still valid
+            setToken(accessToken);
+            console.log('✅ [Auth] Valid token found in localStorage, fetching profile...');
+            await fetchUserProfile(accessToken);
+          }
         } else if (userData) {
-          // Fallback: use cached user data
+          // Fallback: use cached user data if no token
           setUser(JSON.parse(userData));
           setLoading(false);
         } else {

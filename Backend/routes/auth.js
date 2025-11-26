@@ -645,5 +645,309 @@ router.post('/reset-password', async (req, res) => {
   }
 });
 
+/**
+ * ✅ PHASE 3 FIX 3.1: Company Onboarding - Update auto-generated company name
+ * PUT /api/auth/company
+ * 
+ * Purpose:
+ * - Allow users (especially OAuth) to customize their company name after registration
+ * - Company created with auto-generated name (e.g., "John's Company") can be renamed
+ * - Only company admin can update company details
+ * 
+ * Body: { companyName, companyWebsite (optional), companyPhone (optional) }
+ * Returns: Updated company details
+ */
+router.put('/company', authMiddleware, async (req, res) => {
+  try {
+    const { companyName, companyWebsite, companyPhone } = req.body;
+    const userId = req.user.userId;
+
+    // Validation
+    if (!companyName || !companyName.trim()) {
+      return res.status(400).json({ error: 'Company name is required' });
+    }
+
+    if (companyName.trim().length < 2) {
+      return res.status(400).json({ error: 'Company name must be at least 2 characters' });
+    }
+
+    if (companyName.trim().length > 100) {
+      return res.status(400).json({ error: 'Company name must be less than 100 characters' });
+    }
+
+    // Get user's client_id to verify they own the company
+    const userResult = await db.query(
+      'SELECT client_id, role FROM users WHERE id = $1',
+      [userId]
+    );
+
+    if (!userResult.rows.length) {
+      logger.warn('Company update - user not found', { userId });
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { client_id, role } = userResult.rows[0];
+
+    // Only admins can update company details
+    if (role !== 'admin') {
+      logger.warn('Company update - non-admin attempted update', { userId, role });
+      return res.status(403).json({ error: 'Only company admins can update company details' });
+    }
+
+    // Update company with new name and optional fields
+    const updateFields = ['name = $1', 'updated_at = NOW()'];
+    const values = [companyName.trim()];
+
+    if (companyWebsite) {
+      updateFields.push('website = $' + (values.length + 1));
+      values.push(companyWebsite.trim());
+    }
+
+    if (companyPhone) {
+      updateFields.push('phone = $' + (values.length + 1));
+      values.push(companyPhone.trim());
+    }
+
+    values.push(client_id);
+
+    const updateQuery = `
+      UPDATE clients 
+      SET ${updateFields.join(', ')}
+      WHERE id = $${values.length}
+      RETURNING id, name, email, website, phone, active, created_at, updated_at
+    `;
+
+    const result = await db.query(updateQuery, values);
+
+    if (!result.rows.length) {
+      logger.error('Company update - company not found', { client_id });
+      return res.status(404).json({ error: 'Company not found' });
+    }
+
+    const updatedCompany = result.rows[0];
+
+    // Log audit event
+    await db.query(
+      `INSERT INTO audit_logs (client_id, event_type, payload, user_id, ip_address)
+       VALUES ($1, 'company_updated', $2, $3, $4)`,
+      [client_id, JSON.stringify({ 
+        updatedFields: updateFields, 
+        newName: companyName.trim() 
+      }), userId, req.ip]
+    );
+
+    logger.info('✅ Company onboarding completed', {
+      userId,
+      client_id,
+      newCompanyName: companyName.trim(),
+    });
+
+    res.json({
+      success: true,
+      message: 'Company profile updated successfully',
+      company: updatedCompany,
+    });
+
+  } catch (error) {
+    logger.error('Error in company update', { error: error.message });
+    res.status(500).json({ error: 'Failed to update company profile' });
+  }
+});
+
+/**
+ * ✅ PHASE 3 FIX 3.1: Get Company Details
+ * GET /api/auth/company
+ * 
+ * Purpose: Fetch current company details for frontend to show in onboarding
+ * Returns: Company name, status, and other details
+ */
+router.get('/company', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    // Get user's client_id
+    const userResult = await db.query(
+      'SELECT client_id FROM users WHERE id = $1',
+      [userId]
+    );
+
+    if (!userResult.rows.length) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { client_id } = userResult.rows[0];
+
+    // Fetch company details
+    const companyResult = await db.query(
+      'SELECT id, name, email, website, phone, active, created_at, updated_at FROM clients WHERE id = $1',
+      [client_id]
+    );
+
+    if (!companyResult.rows.length) {
+      return res.status(404).json({ error: 'Company not found' });
+    }
+
+    res.json({
+      success: true,
+      company: companyResult.rows[0],
+    });
+
+  } catch (error) {
+    logger.error('Error fetching company details', { error: error.message });
+    res.status(500).json({ error: 'Failed to fetch company details' });
+  }
+});
+
+/**
+ * ✅ PHASE 3 FIX 3.3: Get Linked Auth Methods
+ * GET /api/auth/linked-accounts
+ * 
+ * Purpose: Show user all their linked authentication methods
+ * Returns: List of auth methods (email, OAuth providers, etc.)
+ */
+router.get('/linked-accounts', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    const result = await db.query(
+      `SELECT id, provider, provider_email, is_primary, linked_at, last_used_at
+       FROM auth_methods
+       WHERE user_id = $1
+       ORDER BY is_primary DESC, linked_at DESC`,
+      [userId]
+    );
+
+    res.json({
+      success: true,
+      linkedAccounts: result.rows,
+    });
+
+  } catch (error) {
+    logger.error('Error fetching linked accounts', { error: error.message });
+    res.status(500).json({ error: 'Failed to fetch linked accounts' });
+  }
+});
+
+/**
+ * ✅ PHASE 3 FIX 3.3: Unlink Auth Method
+ * DELETE /api/auth/linked-accounts/:provider
+ * 
+ * Purpose: Remove a linked authentication method
+ * Validation: Cannot remove last auth method or primary method if alternatives exist
+ * Body: { password } - For security, require password to unlink methods
+ */
+router.delete('/linked-accounts/:provider', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { provider } = req.params;
+    const { password } = req.body;
+
+    // Validate provider
+    if (!provider || !['email', 'google', 'github'].includes(provider.toLowerCase())) {
+      return res.status(400).json({ error: 'Invalid provider' });
+    }
+
+    // Get user's current password hash
+    const userResult = await db.query(
+      'SELECT password_hash FROM users WHERE id = $1',
+      [userId]
+    );
+
+    if (!userResult.rows.length) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    // Verify password for security
+    const isPasswordValid = await PasswordUtils.comparePassword(
+      password,
+      userResult.rows[0].password_hash
+    );
+
+    if (!isPasswordValid && provider !== 'email') {
+      return res.status(401).json({ error: 'Invalid password' });
+    }
+
+    // Check how many auth methods user has
+    const authMethodsResult = await db.query(
+      'SELECT COUNT(*) as count FROM auth_methods WHERE user_id = $1 AND provider != $2',
+      [userId, provider]
+    );
+
+    const remainingMethods = parseInt(authMethodsResult.rows[0].count);
+
+    // Cannot delete if it's the only method
+    if (remainingMethods === 0) {
+      return res.status(400).json({
+        error: 'Cannot remove your only authentication method. Link another method first.'
+      });
+    }
+
+    // Delete the auth method
+    const deleteResult = await db.query(
+      'DELETE FROM auth_methods WHERE user_id = $1 AND provider = $2 RETURNING id',
+      [userId, provider.toLowerCase()]
+    );
+
+    if (!deleteResult.rows.length) {
+      return res.status(404).json({ error: 'Auth method not found' });
+    }
+
+    // Log audit event
+    await db.query(
+      `INSERT INTO audit_logs (client_id, event_type, payload, user_id, ip_address)
+       VALUES ($1, 'auth_method_unlinked', $2, $3, $4)`,
+      [req.user.client_id, JSON.stringify({ provider }), userId, req.ip]
+    );
+
+    logger.info('✅ Auth method unlinked', { userId, provider });
+
+    res.json({
+      success: true,
+      message: `${provider} account unlinked successfully`,
+    });
+
+  } catch (error) {
+    logger.error('Error unlinking auth method', { error: error.message });
+    res.status(500).json({ error: 'Failed to unlink authentication method' });
+  }
+});
+
+/**
+ * ✅ PHASE 3 FIX 3.3: Check if Email is Linked
+ * POST /api/auth/check-email-link
+ * 
+ * Purpose: Check if an email is already linked to another account
+ * Security: Prevents email enumeration - always returns generic response
+ * Body: { email }
+ * Returns: { available: boolean }
+ */
+router.post('/check-email-link', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email || !email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
+
+    const result = await db.query(
+      `SELECT COUNT(*) as count FROM users WHERE LOWER(email) = LOWER($1)`,
+      [email]
+    );
+
+    const isLinked = parseInt(result.rows[0].count) > 0;
+
+    // Always return generic response to prevent email enumeration
+    res.json({
+      success: true,
+      available: !isLinked,
+    });
+
+  } catch (error) {
+    logger.error('Error checking email link', { error: error.message });
+    // Return generic response on error
+    res.json({ success: true, available: false });
+  }
+});
+
 module.exports = router;
 
