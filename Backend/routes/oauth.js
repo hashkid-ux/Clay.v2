@@ -40,43 +40,63 @@ router.get(
     try {
       const user = req.user;
 
-      if (!user) {
-        logger.warn('❌ Google callback - no user');
-        return res.redirect('/login?error=no_user');
+      if (!user || !user.id) {
+        logger.warn('❌ Google callback - invalid user object', { user });
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        return res.redirect(`${frontendUrl}/login?error=invalid_user`);
       }
 
-      // Generate JWT token
+      // Validate user has required fields for JWT
+      if (!user.email || !user.client_id || !user.role) {
+        logger.error('❌ Google callback - incomplete user data', {
+          userId: user.id,
+          hasEmail: !!user.email,
+          hasClientId: !!user.client_id,
+          hasRole: !!user.role,
+        });
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        return res.redirect(`${frontendUrl}/login?error=incomplete_profile`);
+      }
+
+      // Generate JWT token with all required fields
       const token = jwt.sign(
         {
           userId: user.id,
           email: user.email,
           clientId: user.client_id,
           role: user.role,
+          name: user.name,
         },
         process.env.JWT_SECRET || 'your-secret-key',
-        { expiresIn: '24h' }
+        { expiresIn: process.env.JWT_EXPIRY || '24h' }
       );
 
-      // Update last login
+      // Update last login timestamp
       await db.query(
         'UPDATE users SET last_login = NOW() WHERE id = $1',
         [user.id]
       );
 
-      logger.info('✅ User logged in via Google', {
+      // Log successful authentication
+      logger.info('✅ User authenticated via Google OAuth', {
         userId: user.id,
         email: user.email,
+        clientId: user.client_id,
       });
 
-      // Redirect to frontend with token
+      // Redirect to frontend with secure token
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-      const redirectUrl = `${frontendUrl}/dashboard?token=${token}`;
+      const redirectUrl = `${frontendUrl}/dashboard?token=${encodeURIComponent(token)}`;
 
       res.redirect(redirectUrl);
     } catch (error) {
-      logger.error('❌ OAuth callback error', { error: error.message });
+      logger.error('❌ OAuth callback error', { 
+        error: error.message,
+        code: error.code,
+        stack: error.stack,
+      });
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-      res.redirect(`${frontendUrl}/login?error=callback_failed`);
+      res.redirect(`${frontendUrl}/login?error=callback_error`);
     }
   }
 );

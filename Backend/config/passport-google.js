@@ -1,6 +1,21 @@
 /**
  * Passport Google OAuth 2.0 Configuration
- * Handles Google login/registration flow
+ * Handles Google login/registration flow with proper error handling
+ * 
+ * FLOW:
+ * 1. User clicks "Login with Google"
+ * 2. Redirected to /api/auth/google
+ * 3. Google OAuth strategy authenticates
+ * 4. Verify callback either:
+ *    - Updates existing user (same email or google_id)
+ *    - Creates new client + user if first-time signup
+ * 5. JWT token generated in oauth.js callback handler
+ * 
+ * CRITICAL FIXES:
+ * - password_hash is now nullable (NULL for OAuth, hashed string for password users)
+ * - Checks for duplicate client.email before creation (prevents constraint violations)
+ * - Links to existing client if email already exists (handles account linking)
+ * - Sets is_verified=true automatically for OAuth (Google verified the email)
  */
 
 const passport = require('passport');
@@ -58,11 +73,49 @@ passport.use(
           return done(null, user);
         }
 
-        // Create new user
+        // Create new user - check if client email already exists first
         const newUserId = uuidv4();
         const newClientId = uuidv4();
 
-        // Create client (company) for new user
+        // CHECK 1: Verify client with this email doesn't already exist
+        // (Edge case: if password user exists with same email but tries to create new OAuth account)
+        const existingClient = await db.query(
+          `SELECT id FROM clients WHERE email = $1`,
+          [email]
+        );
+
+        if (existingClient.rows.length > 0) {
+          // Client already exists - this email is taken
+          // Instead of failing, we should link to existing client's company
+          // but create user in that client
+          logger.warn('⚠️  OAuth email matches existing client - linking to company', {
+            email,
+            clientId: existingClient.rows[0].id,
+          });
+
+          const existingClientId = existingClient.rows[0].id;
+
+          // Create user in existing client
+          const newUserResult = await db.query(
+            `INSERT INTO users 
+             (id, client_id, email, name, google_id, google_refresh_token, password_hash, is_active, is_verified, role, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, NULL, true, true, 'user', NOW())
+             RETURNING *`,
+            [newUserId, existingClientId, email, name, googleId, refreshToken]
+          );
+
+          const newUser = newUserResult.rows[0];
+
+          logger.info('✅ New user created via Google OAuth (linked to existing client)', {
+            userId: newUserId,
+            email,
+            clientId: existingClientId,
+          });
+
+          return done(null, newUser);
+        }
+
+        // CHECK 2: Create new client only if email is unique
         const clientResult = await db.query(
           `INSERT INTO clients (id, name, email, active, created_at)
            VALUES ($1, $2, $3, true, NOW())
@@ -70,11 +123,11 @@ passport.use(
           [newClientId, `${name}'s Company`, email]
         );
 
-        // Create user
+        // CREATE: New user with OAuth credentials (no password_hash needed)
         const newUserResult = await db.query(
           `INSERT INTO users 
-           (id, client_id, email, name, google_id, google_refresh_token, is_active, is_verified, role, created_at)
-           VALUES ($1, $2, $3, $4, $5, $6, true, true, 'admin', NOW())
+           (id, client_id, email, name, google_id, google_refresh_token, password_hash, is_active, is_verified, role, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, NULL, true, true, 'admin', NOW())
            RETURNING *`,
           [newUserId, newClientId, email, name, googleId, refreshToken]
         );
