@@ -58,18 +58,19 @@ router.get(
         return res.redirect(`${frontendUrl}/login?error=incomplete_profile`);
       }
 
-      // Generate JWT token with all required fields
-      const token = jwt.sign(
-        {
-          userId: user.id,
-          email: user.email,
-          clientId: user.client_id,
-          role: user.role,
-          name: user.name,
-        },
-        process.env.JWT_SECRET || 'your-secret-key',
-        { expiresIn: process.env.JWT_EXPIRY || '24h' }
-      );
+      // Import JWTUtils for consistent token generation
+      const JWTUtils = require('../auth/jwtUtils');
+
+      // Generate both access and refresh tokens
+      const tokenPayload = {
+        userId: user.id,
+        email: user.email,
+        client_id: user.client_id,  // FIXED: Use snake_case for consistency
+        role: user.role,
+        name: user.name,
+      };
+
+      const { accessToken, refreshToken } = JWTUtils.generateTokenPair(tokenPayload);
 
       // Update last login timestamp
       await db.query(
@@ -81,12 +82,12 @@ router.get(
       logger.info('✅ User authenticated via Google OAuth', {
         userId: user.id,
         email: user.email,
-        clientId: user.client_id,
+        client_id: user.client_id,
       });
 
-      // Redirect to frontend with secure token
+      // Redirect to frontend with secure tokens
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-      const redirectUrl = `${frontendUrl}/callback?token=${encodeURIComponent(token)}`;
+      const redirectUrl = `${frontendUrl}/callback?accessToken=${encodeURIComponent(accessToken)}&refreshToken=${encodeURIComponent(refreshToken)}`;
 
       res.redirect(redirectUrl);
     } catch (error) {

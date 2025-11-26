@@ -5,11 +5,32 @@ export const AuthContext = createContext();
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
+// Wrapper around fetch to add automatic token refresh on 401
+const fetchWithTokenRefresh = async (url, options = {}, authContext = null) => {
+  let response = await fetch(url, options);
+
+  // If 401 and we have a refresh token, try to refresh
+  if (response.status === 401 && authContext?.refreshToken) {
+    console.log('🔄 [Auth] Token expired, attempting refresh...');
+    const refreshResult = await authContext.refreshToken();
+    
+    if (refreshResult.success) {
+      // Get new token and retry request
+      const newToken = localStorage.getItem('accessToken');
+      options.headers = { ...options.headers, Authorization: `Bearer ${newToken}` };
+      response = await fetch(url, options);
+    }
+  }
+
+  return response;
+};
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [token, setToken] = useState(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Initialize from localStorage on app load
   useEffect(() => {
@@ -61,6 +82,7 @@ export const AuthProvider = ({ children }) => {
         // Token invalid or expired
         console.warn('⚠️  [Auth] Token expired or invalid');
         localStorage.removeItem('accessToken');
+        localStorage.removeItem('refreshToken');
         localStorage.removeItem('user');
         localStorage.removeItem('tokenData');
         setToken(null);
@@ -163,12 +185,20 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const refreshToken = useCallback(async () => {
+    // Prevent multiple concurrent refresh attempts
+    if (isRefreshing) {
+      console.log('⏳ [Auth] Refresh already in progress...');
+      return { success: false, error: 'Refresh in progress' };
+    }
+
+    setIsRefreshing(true);
     try {
       const refreshTokenValue = localStorage.getItem('refreshToken');
       if (!refreshTokenValue) {
-        throw new Error('No refresh token');
+        throw new Error('No refresh token available');
       }
 
+      console.log('🔄 [Auth] Refreshing access token...');
       const response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -178,16 +208,24 @@ export const AuthProvider = ({ children }) => {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error('Token refresh failed');
+        throw new Error(data.error || 'Token refresh failed');
       }
 
-      localStorage.setItem('accessToken', data.accessToken);
+      const newAccessToken = data.token || data.accessToken;
+      localStorage.setItem('accessToken', newAccessToken);
+      setToken(newAccessToken);
+      
+      console.log('✅ [Auth] Token refreshed successfully');
       return { success: true };
     } catch (err) {
+      console.error('❌ [Auth] Token refresh failed:', err);
+      // Clear auth on refresh failure
       logout();
       return { success: false, error: err.message };
+    } finally {
+      setIsRefreshing(false);
     }
-  }, []);
+  }, [isRefreshing]);
 
   const logout = useCallback(async () => {
     try {
@@ -246,6 +284,7 @@ export const AuthProvider = ({ children }) => {
     loading,
     error,
     token,
+    isRefreshing,
     isAuthenticated: isAuthenticated(),
     login,
     register,
@@ -254,7 +293,8 @@ export const AuthProvider = ({ children }) => {
     logout,
     getAuthHeader,
     verifyToken,
-    fetchUserProfile
+    fetchUserProfile,
+    fetchWithTokenRefresh
   };
 
   return (

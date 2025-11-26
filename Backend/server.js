@@ -210,9 +210,14 @@ app.post('/webhooks/exotel/recording', webhookRateLimiter, exotelRoutes.handleRe
 
 // Protected dashboard API routes (require authentication)
 const { authMiddleware } = require(resolve('auth/authMiddleware'));
+const { multiTenancyContext } = require(resolve('middleware/multiTenancy'));
 
 // Apply API rate limiting to all protected routes
 app.use('/api/', apiRateLimiter);
+
+// ✅ PHASE 1 FIX 1.4: Multi-tenancy context middleware
+// Injects tenant info into all authenticated requests for automatic filtering
+app.use('/api/', authMiddleware, multiTenancyContext);
 
 // Onboarding setup routes (protected - clients configure during setup)
 app.use('/api/onboarding', authMiddleware, require(resolve('routes/onboarding')));

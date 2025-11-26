@@ -1,15 +1,15 @@
 /**
  * OAuth Callback Handler Page
- * Handles Google OAuth redirect: /callback?token=JWT_TOKEN
+ * Handles Google OAuth redirect: /callback?accessToken=JWT&refreshToken=JWT
  * 
  * Flow:
- * 1. Extract JWT token from URL query parameters
- * 2. Save token to localStorage
+ * 1. Extract accessToken and refreshToken from URL query parameters
+ * 2. Save both tokens to localStorage
  * 3. Redirect to /dashboard
- * 4. AuthContext will verify token and fetch user profile
+ * 4. AuthContext will verify tokens and fetch user profile
  * 
  * This prevents the redirect loop where ProtectedRoute checks auth
- * before the token is saved to localStorage
+ * before the tokens are saved to localStorage
  */
 
 import React, { useEffect, useState } from 'react';
@@ -25,8 +25,9 @@ const OAuthCallbackPage = () => {
   useEffect(() => {
     const handleOAuthCallback = async () => {
       try {
-        // Extract token from URL: /callback?token=JWT
-        const token = searchParams.get('token');
+        // Extract both tokens from URL: /callback?accessToken=JWT&refreshToken=JWT
+        const accessToken = searchParams.get('accessToken');
+        const refreshToken = searchParams.get('refreshToken');
         const errorParam = searchParams.get('error');
 
         // Check for backend error
@@ -34,37 +35,48 @@ const OAuthCallbackPage = () => {
           throw new Error(`Authentication failed: ${errorParam}`);
         }
 
-        if (!token) {
-          throw new Error('No token received from authentication provider. Please try logging in again.');
+        if (!accessToken) {
+          throw new Error('No access token received from authentication provider. Please try logging in again.');
         }
 
-        console.log('✅ [OAuth] Token received from backend');
+        if (!refreshToken) {
+          throw new Error('No refresh token received from authentication provider. Please try logging in again.');
+        }
+
+        console.log('✅ [OAuth] Both tokens received from backend');
 
         // Validate token format (JWT has 3 parts separated by dots)
-        const parts = token.split('.');
-        if (parts.length !== 3) {
-          throw new Error('Invalid token format received from backend');
+        const accessParts = accessToken.split('.');
+        const refreshParts = refreshToken.split('.');
+        
+        if (accessParts.length !== 3) {
+          throw new Error('Invalid access token format received from backend');
         }
 
-        // Step 1: Save token to localStorage immediately
-        localStorage.setItem('accessToken', token);
-        console.log('✅ [OAuth] Token saved to localStorage');
+        if (refreshParts.length !== 3) {
+          throw new Error('Invalid refresh token format received from backend');
+        }
 
-        // Step 2: Decode and save token data for quick access (without verification)
+        // Step 1: Save tokens to localStorage immediately
+        localStorage.setItem('accessToken', accessToken);
+        localStorage.setItem('refreshToken', refreshToken);
+        console.log('✅ [OAuth] Both tokens saved to localStorage');
+
+        // Step 2: Decode and save access token data for quick access (without verification)
         // This is safe since the backend already verified it
         try {
-          const decoded = JSON.parse(atob(parts[1]));
-          console.log('✅ [OAuth] Token decoded:', {
+          const decoded = JSON.parse(atob(accessParts[1]));
+          console.log('✅ [OAuth] Access token decoded:', {
             userId: decoded.userId,
             email: decoded.email,
-            clientId: decoded.clientId,
+            client_id: decoded.client_id,
             expiresIn: decoded.exp - Math.floor(Date.now() / 1000) + 's',
           });
 
           localStorage.setItem('tokenData', JSON.stringify({
             userId: decoded.userId,
             email: decoded.email,
-            clientId: decoded.clientId,
+            client_id: decoded.client_id,
             expiresAt: decoded.exp * 1000, // Convert to milliseconds
           }));
         } catch (decodeError) {
@@ -76,7 +88,7 @@ const OAuthCallbackPage = () => {
         await new Promise(resolve => setTimeout(resolve, 100));
 
         // Step 4: Redirect to dashboard
-        // AuthContext useEffect will now find the token in localStorage
+        // AuthContext useEffect will now find the tokens in localStorage
         // and fetch the full user profile
         console.log('✅ [OAuth] Redirecting to dashboard');
         navigate('/dashboard', { replace: true });
