@@ -28,6 +28,9 @@ const setupSwagger = require(resolve('docs/swagger'));
 // Load Passport strategies
 require('./config/passport-google');
 
+// Load migration system
+const { runMigrations } = require('./db/migrationsystem');
+
 /**
  * 🔒 AUTO-INITIALIZE DATABASE SAFELY
  * ✅ Creates tables if they don't exist
@@ -86,6 +89,14 @@ async function initializeDatabase() {
     }
 
     logger.info(`✅ Database initialization complete (${successCount} executed, ${skipCount} skipped)`);
+    
+    // Step 4: Run migrations
+    logger.info('🔄 Running database migrations...');
+    const migrationsSuccess = await runMigrations();
+    if (!migrationsSuccess) {
+      logger.warn('⚠️  Some migrations may have failed, but continuing...');
+    }
+    
     return true;
   } catch (error) {
     logger.error('❌ Database initialization failed', {
