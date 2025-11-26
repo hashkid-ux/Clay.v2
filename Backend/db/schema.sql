@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS "session" (
 CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire");
 
 -- Clients table: Multi-tenant client configuration
-CREATE TABLE clients (
+CREATE TABLE IF NOT EXISTS clients (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name TEXT NOT NULL,
   contact_person TEXT,
@@ -78,13 +78,13 @@ CREATE TABLE users (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX idx_users_email ON users(email);
-CREATE INDEX idx_users_email_lower ON users(LOWER(email));
-CREATE INDEX idx_users_client_id ON users(client_id);
-CREATE INDEX idx_users_created_at ON users(created_at);
-CREATE INDEX idx_users_google_id ON users(google_id) WHERE google_id IS NOT NULL;
-CREATE INDEX idx_users_last_login ON users(last_login);
-CREATE INDEX idx_users_is_active ON users(is_active);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_email_lower ON users(LOWER(email));
+CREATE INDEX IF NOT EXISTS idx_users_client_id ON users(client_id);
+CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at);
+CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id) WHERE google_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_last_login ON users(last_login);
+CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);
 
 -- Ensure OAuth columns exist (safe for existing databases)
 ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS google_id VARCHAR(255) UNIQUE;
@@ -94,7 +94,7 @@ ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS verified_at TIMESTAMP WITH 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id_alt ON users(google_id) WHERE google_id IS NOT NULL;
 
 -- Calls table: Main call records (per client)
-CREATE TABLE calls (
+CREATE TABLE IF NOT EXISTS calls (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   client_id UUID NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
   call_sid TEXT UNIQUE,
@@ -112,7 +112,7 @@ CREATE TABLE calls (
 );
 
 -- Actions table: Tracks all backend actions performed during calls
-CREATE TABLE actions (
+CREATE TABLE IF NOT EXISTS actions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   call_id UUID REFERENCES calls(id) ON DELETE CASCADE,
   action_type TEXT NOT NULL,
@@ -127,7 +127,7 @@ CREATE TABLE actions (
 );
 
 -- Entities table: Extracted information from conversations
-CREATE TABLE entities (
+CREATE TABLE IF NOT EXISTS entities (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   call_id UUID REFERENCES calls(id) ON DELETE CASCADE,
   entity_type TEXT NOT NULL, -- order_id, phone, email, name, product_id, etc.
@@ -138,7 +138,7 @@ CREATE TABLE entities (
 );
 
 -- Audit logs: Track all system actions for security and compliance
-CREATE TABLE audit_logs (
+CREATE TABLE IF NOT EXISTS audit_logs (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   call_id UUID REFERENCES calls(id) ON DELETE SET NULL,
   client_id UUID REFERENCES clients(id) ON DELETE SET NULL,
@@ -151,7 +151,7 @@ CREATE TABLE audit_logs (
 );
 
 -- Agent Performance Metrics (for analytics)
-CREATE TABLE agent_metrics (
+CREATE TABLE IF NOT EXISTS agent_metrics (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
   agent_type TEXT NOT NULL,
@@ -165,22 +165,23 @@ CREATE TABLE agent_metrics (
 );
 
 -- Create indexes for performance
-CREATE INDEX idx_calls_client_id ON calls(client_id);
-CREATE INDEX idx_calls_start_ts ON calls(start_ts);
-CREATE INDEX idx_calls_phone_from ON calls(phone_from);
-CREATE INDEX idx_calls_resolved ON calls(resolved);
-CREATE INDEX idx_actions_call_id ON actions(call_id);
-CREATE INDEX idx_actions_status ON actions(status);
-CREATE INDEX idx_actions_type ON actions(action_type);
-CREATE INDEX idx_entities_call_id ON entities(call_id);
-CREATE INDEX idx_entities_type ON entities(entity_type);
-CREATE INDEX idx_audit_logs_call_id ON audit_logs(call_id);
-CREATE INDEX idx_audit_logs_client_id ON audit_logs(client_id);
-CREATE INDEX idx_audit_logs_created_at ON audit_logs(created_at);
-CREATE INDEX idx_agent_metrics_client_date ON agent_metrics(client_id, date);
+CREATE INDEX IF NOT EXISTS idx_calls_client_id ON calls(client_id);
+CREATE INDEX IF NOT EXISTS idx_calls_start_ts ON calls(start_ts);
+CREATE INDEX IF NOT EXISTS idx_calls_phone_from ON calls(phone_from);
+CREATE INDEX IF NOT EXISTS idx_calls_resolved ON calls(resolved);
+CREATE INDEX IF NOT EXISTS idx_actions_call_id ON actions(call_id);
+CREATE INDEX IF NOT EXISTS idx_actions_status ON actions(status);
+CREATE INDEX IF NOT EXISTS idx_actions_type ON actions(action_type);
+CREATE INDEX IF NOT EXISTS idx_entities_call_id ON entities(call_id);
+CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(entity_type);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_call_id ON audit_logs(call_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_client_id ON audit_logs(client_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_agent_metrics_client_date ON agent_metrics(client_id, date);
 
 -- Create updated_at trigger function
-CREATE OR REPLACE FUNCTION update_updated_at_column() RETURNS TRIGGER AS $$ BEGIN NEW.updated_at = NOW(); RETURN NEW; END; $$ LANGUAGE plpgsql;
+-- Using $func$ tags to uniquely identify dollar-quoted string boundaries
+CREATE OR REPLACE FUNCTION update_updated_at_column() RETURNS TRIGGER AS $func$ BEGIN NEW.updated_at = NOW(); RETURN NEW; END; $func$ LANGUAGE plpgsql;
 
 -- Drop existing triggers before recreating them
 DROP TRIGGER IF EXISTS update_calls_updated_at ON calls;
@@ -189,16 +190,16 @@ DROP TRIGGER IF EXISTS update_clients_updated_at ON clients;
 DROP TRIGGER IF EXISTS update_users_updated_at ON users;
 
 -- Add triggers to auto-update updated_at
-CREATE TRIGGER update_calls_updated_at BEFORE UPDATE ON calls
+CREATE TRIGGER IF NOT EXISTS update_calls_updated_at BEFORE UPDATE ON calls
 FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_actions_updated_at BEFORE UPDATE ON actions
+CREATE TRIGGER IF NOT EXISTS update_actions_updated_at BEFORE UPDATE ON actions
 FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_clients_updated_at BEFORE UPDATE ON clients
+CREATE TRIGGER IF NOT EXISTS update_clients_updated_at BEFORE UPDATE ON clients
 FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
+CREATE TRIGGER IF NOT EXISTS update_users_updated_at BEFORE UPDATE ON users
 FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Insert sample client for testing (remove in production)
