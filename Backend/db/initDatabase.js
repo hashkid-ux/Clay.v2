@@ -19,7 +19,7 @@ const logger = require('../utils/logger');
  * Parse SQL file into individual statements, respecting multi-line statements
  * Handles:
  * - Multi-line CREATE TABLE statements
- * - Comments (-- and /* */)
+ * - Comments (-- and / * /)
  * - String literals containing semicolons
  * - Dollar quotes ($$ - PostgreSQL specific)
  * 
@@ -71,15 +71,19 @@ function parseSqlStatements(sql) {
         const tag = sql.substring(i + 1, tagEnd);
 
         if (!inDollarQuote) {
+          // Entering dollar quote
           inDollarQuote = true;
           dollarQuoteTag = tag;
+          // Add the dollar quote tag itself to the statement
+          currentStatement += sql.substring(i, tagEnd + 1);
           i = tagEnd + 1;
-          currentStatement += sql.substring(i - (tagEnd - i + 1), i);
           continue;
         } else if (tag === dollarQuoteTag) {
+          // Exiting dollar quote
           inDollarQuote = false;
+          // Add the closing dollar quote tag to the statement
+          currentStatement += sql.substring(i, tagEnd + 1);
           i = tagEnd + 1;
-          currentStatement += sql.substring(i - (tagEnd - i + 1), i);
           continue;
         }
       }
