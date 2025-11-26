@@ -86,7 +86,7 @@ router.get(
 
       // Redirect to frontend with secure token
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-      const redirectUrl = `${frontendUrl}/dashboard?token=${encodeURIComponent(token)}`;
+      const redirectUrl = `${frontendUrl}/callback?token=${encodeURIComponent(token)}`;
 
       res.redirect(redirectUrl);
     } catch (error) {
