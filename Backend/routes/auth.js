@@ -40,7 +40,7 @@ router.post('/register', async (req, res) => {
       return res.status(409).json({ error: 'Email already registered' });
     }
 
-    // Create client (company) first
+    // ✅ PHASE 2 FIX 2.4: Create client (company) INACTIVE until email verified
     const clientId = uuidv4();
     const clientResult = await db.query(
       `INSERT INTO clients (id, name, email, active, created_at) 
@@ -59,10 +59,11 @@ router.post('/register', async (req, res) => {
     const otp = PasswordUtils.generateOTP();
     const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
+    // ✅ PHASE 2 FIX 2.4: Set is_active to FALSE until email verified
     const userResult = await db.query(
       `INSERT INTO users 
        (id, client_id, email, password_hash, name, role, otp_code, otp_expires_at, is_active)
-       VALUES ($1, $2, $3, $4, $5, 'admin', $6, $7, true)
+       VALUES ($1, $2, $3, $4, $5, 'admin', $6, $7, false)
        RETURNING id, email, name, client_id`,
       [userId, clientId, email, passwordHash, (firstName + ' ' + lastName).trim() || 'Admin User', otp, otpExpiresAt]
     );
@@ -93,11 +94,12 @@ router.post('/register', async (req, res) => {
       [clientId, JSON.stringify({ email, companyName }), userId, req.ip]
     );
 
-    logger.info('Company registered', { 
+    logger.info('Company registered (awaiting email verification)', { 
       clientId,
       userId,
       email,
-      companyName 
+      companyName,
+      is_active: false
     });
 
     res.status(201).json({
@@ -185,11 +187,11 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Email and password required' });
     }
 
-    // Find user
+    // Find user with client info
     const userResult = await db.query(
       `SELECT u.id, u.email, u.password_hash, u.name, 
               u.client_id, u.role, u.is_active,
-              c.name as company_name
+              c.name as company_name, c.active as company_active
        FROM users u
        JOIN clients c ON u.client_id = c.id
        WHERE u.email = $1`,
@@ -203,10 +205,16 @@ router.post('/login', async (req, res) => {
 
     const user = userResult.rows[0];
 
-    // Check if user is active
+    // ✅ PHASE 2 FIX 2.4: Check if user is active
     if (!user.is_active) {
       logger.warn('Login attempt - user inactive', { email, ip: req.ip });
-      return res.status(401).json({ error: 'Account is inactive' });
+      return res.status(401).json({ error: 'Account is inactive. Please verify your email.' });
+    }
+
+    // ✅ PHASE 2 FIX 2.4: Check if company is active
+    if (!user.company_active) {
+      logger.warn('Login attempt - company inactive', { email, clientId: user.client_id, ip: req.ip });
+      return res.status(401).json({ error: 'Company account is not active. Please contact support.' });
     }
 
     // Verify password
@@ -233,7 +241,12 @@ router.post('/login', async (req, res) => {
       [user.id]
     );
 
-    logger.info('User logged in', { userId: user.id, email, ip: req.ip });
+    logger.info('✅ User logged in successfully', { 
+      userId: user.id, 
+      email, 
+      clientId: user.client_id,
+      ip: req.ip 
+    });
 
     res.json({
       message: 'Login successful',
@@ -259,6 +272,7 @@ router.post('/login', async (req, res) => {
 /**
  * POST /api/auth/refresh - Refresh access token
  * Body: { refreshToken }
+ * Returns new access token if refresh token is valid and not blacklisted
  */
 router.post('/refresh', async (req, res) => {
   try {
@@ -268,8 +282,8 @@ router.post('/refresh', async (req, res) => {
       return res.status(400).json({ error: 'Refresh token required' });
     }
 
-    // Verify refresh token
-    const decoded = JWTUtils.verifyToken(refreshToken);
+    // ✅ PHASE 2 FIX 2.1: Check if token is blacklisted (on logout)
+    const decoded = await JWTUtils.verifyRefreshToken(refreshToken);
 
     // Generate new access token
     const tokenPayload = {
@@ -282,13 +296,26 @@ router.post('/refresh', async (req, res) => {
 
     const newAccessToken = JWTUtils.signToken(tokenPayload);
 
+    logger.info('✅ Token refreshed successfully', {
+      userId: decoded.userId,
+      email: decoded.email
+    });
+
     res.json({
+      token: newAccessToken,
       accessToken: newAccessToken,
       expiresIn: '24h'
     });
 
   } catch (error) {
-    logger.warn('Refresh token failed', { error: error.message });
+    logger.warn('🚫 Refresh token failed', { error: error.message });
+    
+    if (error.message === 'Token has been revoked') {
+      return res.status(401).json({ 
+        error: 'Session has been invalidated. Please login again.' 
+      });
+    }
+
     res.status(401).json({ error: 'Invalid refresh token' });
   }
 });
@@ -296,20 +323,21 @@ router.post('/refresh', async (req, res) => {
 /**
  * POST /api/auth/logout - Logout and blacklist refresh token
  * Requires auth
+ * Body: { refreshToken }
  */
 router.post('/logout', authMiddleware, async (req, res) => {
   try {
     const { refreshToken } = req.body;
 
+    // Blacklist the refresh token if provided (prevents reuse)
     if (refreshToken) {
-      // Optional: blacklist the refresh token
-      // await db.query(
-      //   'INSERT INTO refresh_token_blacklist (user_id, token_jti, expires_at) VALUES ($1, $2, $3)',
-      //   [req.user.id, decoded.jti, new Date(decoded.exp * 1000)]
-      // );
+      await JWTUtils.blacklistRefreshToken(refreshToken);
     }
 
-    logger.info('User logged out', { userId: req.user.id });
+    logger.info('✅ User logged out successfully', { 
+      userId: req.user.id,
+      email: req.user.email
+    });
 
     res.json({ message: 'Logged out successfully' });
 
@@ -449,4 +477,173 @@ router.post('/refresh', async (req, res) => {
   }
 });
 
+/**
+ * ✅ PHASE 2 FIX 2.2: Password reset endpoints
+ */
+
+/**
+ * POST /api/auth/forgot-password - Request password reset
+ * Body: { email }
+ * Returns: { message: 'Reset link sent to email' }
+ */
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email || !email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
+      return res.status(400).json({ error: 'Valid email required' });
+    }
+
+    // Find user - but don't reveal if email exists (security)
+    const userResult = await db.query(
+      'SELECT id FROM users WHERE email = $1',
+      [email]
+    );
+
+    if (userResult.rows.length === 0) {
+      // Return success even if email not found (security best practice)
+      return res.json({ 
+        message: 'If that email exists, a reset link has been sent.' 
+      });
+    }
+
+    const user = userResult.rows[0];
+
+    // Generate secure reset token
+    const resetToken = require('crypto').randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 1 * 60 * 60 * 1000); // 1 hour
+
+    // Save reset token to database
+    await db.query(
+      `INSERT INTO password_reset_tokens (user_id, reset_token, expires_at)
+       VALUES ($1, $2, $3)
+       ON CONFLICT DO NOTHING`,
+      [user.id, resetToken, expiresAt]
+    );
+
+    // Send reset email
+    const resetLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password?token=${resetToken}&email=${encodeURIComponent(email)}`;
+    
+    try {
+      await emailService.sendPasswordResetEmail(email, resetLink);
+      logger.info('✅ Password reset email sent', { email });
+    } catch (emailError) {
+      logger.warn('⚠️  Failed to send password reset email', { 
+        email,
+        error: emailError.message 
+      });
+      // Still return success - don't reveal email sending issues
+    }
+
+    res.json({ 
+      message: 'If that email exists, a reset link has been sent.' 
+    });
+
+  } catch (error) {
+    logger.error('Error in forgot-password', { error: error.message });
+    res.status(500).json({ error: 'Failed to process password reset request' });
+  }
+});
+
+/**
+ * POST /api/auth/reset-password - Reset password with token
+ * Body: { email, reset_token, new_password }
+ * Returns: { message: 'Password reset successful' }
+ */
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { email, reset_token, new_password } = req.body;
+
+    // Validation
+    if (!email || !reset_token || !new_password) {
+      return res.status(400).json({ error: 'Email, token, and password required' });
+    }
+
+    // Validate new password strength
+    const passwordValidation = PasswordUtils.validatePasswordStrength(new_password);
+    if (!passwordValidation.isValid) {
+      return res.status(400).json({ 
+        error: 'Password too weak',
+        details: passwordValidation.errors 
+      });
+    }
+
+    // Find user
+    const userResult = await db.query(
+      'SELECT id FROM users WHERE email = $1',
+      [email]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const user = userResult.rows[0];
+
+    // Verify reset token exists, is valid, and not used
+    const tokenResult = await db.query(
+      `SELECT id FROM password_reset_tokens 
+       WHERE user_id = $1 AND reset_token = $2 AND expires_at > NOW() AND used_at IS NULL
+       LIMIT 1`,
+      [user.id, reset_token]
+    );
+
+    if (tokenResult.rows.length === 0) {
+      return res.status(401).json({ error: 'Invalid or expired reset token' });
+    }
+
+    const tokenRecord = tokenResult.rows[0];
+
+    // Hash new password
+    const hashedPassword = await PasswordUtils.hashPassword(new_password);
+
+    // Update password in transaction
+    const client = await db.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Update user password
+      await client.query(
+        'UPDATE users SET password_hash = $1 WHERE id = $2',
+        [hashedPassword, user.id]
+      );
+
+      // Mark token as used
+      await client.query(
+        'UPDATE password_reset_tokens SET used_at = NOW() WHERE id = $1',
+        [tokenRecord.id]
+      );
+
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    // Send confirmation email
+    try {
+      await emailService.sendPasswordResetConfirmationEmail(email);
+      logger.info('✅ Password reset confirmation email sent', { email });
+    } catch (emailError) {
+      logger.warn('⚠️  Failed to send confirmation email', { 
+        email,
+        error: emailError.message 
+      });
+    }
+
+    logger.info('✅ Password reset successful', { userId: user.id, email });
+
+    res.json({ 
+      message: 'Password reset successful. Please login with your new password.' 
+    });
+
+  } catch (error) {
+    logger.error('Error in reset-password', { error: error.message });
+    res.status(500).json({ error: 'Failed to reset password' });
+  }
+});
+
 module.exports = router;
+

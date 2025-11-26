@@ -301,6 +301,47 @@ const loginRateLimiter = createRateLimiter({
 });
 
 /**
+ * ✅ PHASE 2 FIX 2.3: Registration rate limiter - strict (5 per 15 minutes per IP)
+ */
+const registerRateLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // 5 registration attempts
+  keyGenerator: (req) => {
+    // Rate limit by IP address
+    return `register-${req.ip}`;
+  },
+  message: 'Too many registration attempts, please try again later',
+});
+
+/**
+ * ✅ PHASE 2 FIX 2.3: Email verification rate limiter - strict (5 per 5 minutes per email)
+ */
+const verifyEmailRateLimiter = createRateLimiter({
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  max: 5, // 5 verification attempts
+  keyGenerator: (req) => {
+    // Rate limit by email address
+    const email = req.body?.email || req.ip;
+    return `verify-email-${email}`;
+  },
+  message: 'Too many verification attempts, please try again later',
+});
+
+/**
+ * ✅ PHASE 2 FIX 2.3: Resend OTP rate limiter - moderate (3 per 2 minutes per email)
+ */
+const resendOtpRateLimiter = createRateLimiter({
+  windowMs: 2 * 60 * 1000, // 2 minutes
+  max: 3, // 3 resend attempts
+  keyGenerator: (req) => {
+    // Rate limit by email address
+    const email = req.body?.email || req.ip;
+    return `resend-otp-${email}`;
+  },
+  message: 'Please wait before requesting another OTP',
+});
+
+/**
  * API rate limiter - moderate (100 requests per 15 minutes)
  */
 const apiRateLimiter = createRateLimiter({
@@ -389,6 +430,9 @@ module.exports = {
 
   // Pre-configured limiters
   loginRateLimiter,
+  registerRateLimiter,
+  verifyEmailRateLimiter,
+  resendOtpRateLimiter,
   apiRateLimiter,
   webhookRateLimiter,
   uploadRateLimiter,

@@ -80,6 +80,9 @@ const auditLogger = require(resolve('services/auditLogger'));
 const { errorHandler, NotFoundError } = require(resolve('middleware/errorHandler'));
 const {
   loginRateLimiter,
+  registerRateLimiter,
+  verifyEmailRateLimiter,
+  resendOtpRateLimiter,
   webhookRateLimiter,
   apiRateLimiter
 } = require(resolve('middleware/rateLimiter'));
@@ -198,8 +201,11 @@ app.get('/health-legacy', (req, res) => {
 });
 
 // Authentication routes (public - no auth required)
-// Apply strict rate limiting to login endpoint
+// Apply strict rate limiting to auth endpoints
 app.use('/api/auth/login', loginRateLimiter);
+app.use('/api/auth/register', registerRateLimiter);
+app.use('/api/auth/verify-email', verifyEmailRateLimiter);
+app.use('/api/auth/resend-otp', resendOtpRateLimiter);
 app.use('/api/auth', require(resolve('routes/auth')));
 
 // Exotel webhooks (with webhook rate limiting)

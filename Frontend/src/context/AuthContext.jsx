@@ -229,12 +229,18 @@ export const AuthProvider = ({ children }) => {
 
   const logout = useCallback(async () => {
     try {
-      // Try to logout on backend
+      // ✅ PHASE 2 FIX 2.1: Blacklist refresh token on logout
       const accessToken = localStorage.getItem('accessToken');
+      const refreshToken = localStorage.getItem('refreshToken');
+      
       if (accessToken) {
         await fetch(`${API_BASE_URL}/api/auth/logout`, {
           method: 'POST',
-          headers: { Authorization: `Bearer ${accessToken}` }
+          headers: { 
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ refreshToken })
         }).catch(() => {
           // Ignore logout errors
         });
