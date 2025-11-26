@@ -8,6 +8,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import OnboardingPage from './pages/OnboardingPage';
+import OAuthCallbackPage from './pages/OAuthCallbackPage';
 
 // Dashboard Components
 import Dashboard from './pages/Dashboard';
@@ -24,6 +25,7 @@ function App() {
             {/* Public Routes - No Auth Required */}
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
+            <Route path="/callback" element={<OAuthCallbackPage />} />
 
             {/* Protected Routes - Auth Required */}
             <Route

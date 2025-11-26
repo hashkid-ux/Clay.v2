@@ -11,40 +11,67 @@ export const AuthProvider = ({ children }) => {
   const [error, setError] = useState(null);
   const [token, setToken] = useState(null);
 
-  // Initialize from localStorage
+  // Initialize from localStorage on app load
   useEffect(() => {
-    const accessToken = localStorage.getItem('accessToken');
-    const userData = localStorage.getItem('user');
-    
-    if (accessToken) {
-      setToken(accessToken);
-      // Fetch user profile from token
-      fetchUserProfile(accessToken);
-    } else if (userData) {
-      setUser(JSON.parse(userData));
-      setLoading(false);
-    } else {
-      setLoading(false);
-    }
+    const initializeAuth = async () => {
+      try {
+        const accessToken = localStorage.getItem('accessToken');
+        const userData = localStorage.getItem('user');
+        
+        if (accessToken) {
+          setToken(accessToken);
+          console.log('✅ [Auth] Token found in localStorage, fetching profile...');
+          // Fetch user profile from token
+          await fetchUserProfile(accessToken);
+        } else if (userData) {
+          // Fallback: use cached user data
+          setUser(JSON.parse(userData));
+          setLoading(false);
+        } else {
+          // No auth data found
+          setLoading(false);
+        }
+      } catch (err) {
+        console.error('❌ [Auth] Initialization error:', err);
+        setLoading(false);
+      }
+    };
+
+    initializeAuth();
   }, []);
 
   const fetchUserProfile = useCallback(async (accessToken) => {
     try {
+      console.log('🔗 [Auth] Fetching user profile...');
+      
       const response = await fetch(`${API_BASE_URL}/api/auth/profile`, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
 
       if (response.ok) {
         const data = await response.json();
+        console.log('✅ [Auth] Profile fetched successfully:', {
+          userId: data.user.id,
+          email: data.user.email,
+        });
         setUser(data.user);
         localStorage.setItem('user', JSON.stringify(data.user));
-      } else {
-        // Token invalid, clear it
+        setError(null);
+      } else if (response.status === 401) {
+        // Token invalid or expired
+        console.warn('⚠️  [Auth] Token expired or invalid');
         localStorage.removeItem('accessToken');
+        localStorage.removeItem('user');
+        localStorage.removeItem('tokenData');
         setToken(null);
+        setUser(null);
+        setError('Session expired. Please login again.');
+      } else {
+        throw new Error(`Failed to fetch profile: ${response.status}`);
       }
     } catch (err) {
-      console.error('Failed to fetch profile:', err);
+      console.error('❌ [Auth] Profile fetch error:', err);
+      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -65,14 +92,27 @@ export const AuthProvider = ({ children }) => {
         throw new Error(data.error || 'Login failed');
       }
 
-      localStorage.setItem('accessToken', data.accessToken);
-      localStorage.setItem('refreshToken', data.refreshToken);
-      localStorage.setItem('user', JSON.stringify(data.user));
-      setToken(data.accessToken);
-      setUser(data.user);
+      // Save tokens and user data
+      const accessToken = data.token || data.accessToken;
+      if (!accessToken) {
+        throw new Error('No token received from server');
+      }
+
+      localStorage.setItem('accessToken', accessToken);
+      if (data.refreshToken) {
+        localStorage.setItem('refreshToken', data.refreshToken);
+      }
+      if (data.user) {
+        localStorage.setItem('user', JSON.stringify(data.user));
+        setUser(data.user);
+      }
+
+      setToken(accessToken);
+      console.log('✅ [Auth] Login successful');
 
       return { success: true, user: data.user };
     } catch (err) {
+      console.error('❌ [Auth] Login error:', err);
       setError(err.message);
       return { success: false, error: err.message };
     }
@@ -162,13 +202,17 @@ export const AuthProvider = ({ children }) => {
         });
       }
     } catch (err) {
-      console.error('Logout error:', err);
+      console.error('❌ [Auth] Logout error:', err);
     } finally {
+      // Clear all auth data from localStorage
       localStorage.removeItem('accessToken');
       localStorage.removeItem('refreshToken');
       localStorage.removeItem('user');
+      localStorage.removeItem('tokenData');
       setUser(null);
       setToken(null);
+      setError(null);
+      console.log('✅ [Auth] Logged out');
     }
   }, []);
 
