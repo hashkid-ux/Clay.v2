@@ -4,7 +4,7 @@ const resolve = require('../utils/moduleResolver');
 const db = require(resolve('db/postgres'));
 const logger = require(resolve('utils/logger'));
 
-// Get webhook base URL - support Railway public domain or fallback to env variable
+// Get webhook base URL - strict production validation
 const getWebhookBaseUrl = () => {
   if (process.env.RAILWAY_PUBLIC_DOMAIN) {
     // Railway environment - use auto-generated public domain
@@ -14,7 +14,12 @@ const getWebhookBaseUrl = () => {
     // Custom domain set in env variables
     return process.env.EXOTEL_WEBHOOK_BASE_URL;
   }
-  // Fallback for local development
+  // Production strict - require explicit configuration
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('❌ CRITICAL: EXOTEL_WEBHOOK_BASE_URL or RAILWAY_PUBLIC_DOMAIN must be set in production');
+  }
+  // Development fallback
+  logger.warn('⚠️  Using localhost fallback for Exotel webhooks (development only)');
   return 'http://localhost:3000';
 };
 

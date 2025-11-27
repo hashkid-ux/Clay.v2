@@ -1,6 +1,10 @@
 // server.js - Main Caly Server (Updated for Multi-tenancy + OAuth2 + Safe DB Init)
 require('dotenv').config();
 
+// CRITICAL: Initialize Sentry FIRST - before any errors can occur
+const { initSentry, getSentryMiddleware, flush: sentryfluesh } = require('./utils/sentryIntegration');
+initSentry();
+
 // CRITICAL: Validate environment variables BEFORE anything else
 const envValidator = require('./utils/envValidator');
 envValidator.validate();
@@ -24,6 +28,7 @@ const sessionManager = require(resolve('sessions/CallSessionManager'));
 const GracefulShutdown = require(resolve('utils/gracefulShutdown'));
 const requestIdMiddleware = require(resolve('middleware/requestId'));
 const setupSwagger = require(resolve('docs/swagger'));
+const { createApmMiddleware } = require(resolve('utils/apmMonitoring'));
 
 // Load Passport strategies
 require('./config/passport-google');
@@ -112,11 +117,32 @@ const {
 // Middleware
 app.use(helmet());
 
-// 🔒 SECURITY FIX 1: Proper CORS configuration - whitelist allowed origins
-const allowedOrigins = [
-  process.env.FRONTEND_URL || 'http://localhost:3000',
-  process.env.FRONTEND_URL_ALT || '',
-].filter(Boolean);
+// ✅ PHASE 3: Sentry error tracking (must be first middleware)
+const { requestHandler: sentryRequestHandler, errorHandler: sentryErrorHandler } = getSentryMiddleware();
+app.use(sentryRequestHandler);
+
+// ✅ PHASE 3: APM monitoring middleware
+app.use(createApmMiddleware());
+
+// 🔒 SECURITY FIX 1: Proper CORS configuration - strict production validation
+const allowedOrigins = (() => {
+  const origins = [
+    process.env.FRONTEND_URL,
+    process.env.FRONTEND_URL_ALT,
+  ].filter(Boolean);
+  
+  // Strict production validation
+  if (process.env.NODE_ENV === 'production' && !process.env.FRONTEND_URL) {
+    throw new Error('❌ CRITICAL: FRONTEND_URL must be set in production');
+  }
+  
+  // Add localhost fallback only in development
+  if (process.env.NODE_ENV !== 'production') {
+    origins.push('http://localhost:3000');
+  }
+  
+  return origins;
+})();
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -236,8 +262,13 @@ setupSwagger(app);
 // Health check routes
 app.use('/health', require(resolve('routes/health')));
 
-// Test/debug routes (for development and testing)
-app.use('/api/test', require(resolve('routes/test')));
+// Test/debug routes (development only - disabled in production)
+if (process.env.NODE_ENV !== 'production') {
+  app.use('/api/test', require(resolve('routes/test')));
+  logger.info('⚠️  Test routes enabled (development mode only)');
+} else {
+  logger.info('✅ Test routes disabled (production mode)');
+}
 
 // OAuth routes (public - for Google authentication)
 // IMPORTANT: Registered at /api/auth not /api/oauth because Google redirects to /api/auth/google/callback
@@ -281,6 +312,9 @@ app.use('/api/', apiRateLimiter);
 // ✅ PHASE 1 FIX 1.4: Multi-tenancy context middleware
 // Injects tenant info into all authenticated requests for automatic filtering
 app.use('/api/', authMiddleware, multiTenancyContext);
+
+// ✅ PHASE 3: Monitoring routes (APM, circuit breakers, system health)
+app.use('/api/monitoring', require(resolve('routes/monitoring')));
 
 // Onboarding setup routes (protected - clients configure during setup)
 app.use('/api/onboarding', authMiddleware, require(resolve('routes/onboarding')));
@@ -436,10 +470,15 @@ app.use((req, res, next) => {
   next(error);
 });
 
+// ✅ PHASE 3: Sentry error handler (before custom error handler)
+app.use(sentryErrorHandler);
+
 // Error handling middleware - MUST BE LAST
 app.use(errorHandler);
 
-// Graceful shutdown
+// ✅ PHASE 3: Graceful shutdown - flush pending error events to Sentry
+const { flush: sentryflush } = require(resolve('utils/sentryIntegration'));
+
 const gracefulShutdown = async () => {
   logger.info('Shutting down gracefully...');
   
@@ -453,6 +492,9 @@ const gracefulShutdown = async () => {
   
   await db.close();
   logger.info('Database connections closed');
+  
+  // Flush Sentry events before exit
+  await sentryflush(5000);
   
   process.exit(0);
 };
