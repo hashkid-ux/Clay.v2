@@ -6,6 +6,7 @@ const logger = require(resolve('utils/logger'));
 const db = require(resolve('db/postgres'));
 const { authMiddleware } = require(resolve('auth/authMiddleware'));
 const { encrypt, decrypt } = require(resolve('utils/encryption'));
+const { validateBody, commonSchemas } = require(resolve('middleware/validation')); // ✅ PHASE 2 FIX 4
 
 // Validate Shopify credentials
 async function validateShopifyCredentials(apiKey, apiSecret, storeUrl) {
@@ -78,7 +79,8 @@ router.get('/status', authMiddleware, async (req, res) => {
 });
 
 // POST - Complete onboarding setup
-router.post('/complete', authMiddleware, async (req, res) => {
+// ✅ PHASE 2 FIX 4: Add input validation
+router.post('/complete', authMiddleware, validateBody(commonSchemas.onboardingCompleteSchema), async (req, res) => {
   try {
     const client_id = req.user.client_id;
     const {
@@ -97,8 +99,8 @@ router.post('/complete', authMiddleware, async (req, res) => {
       enableEmail
     } = req.body;
 
-    // Validation
-    const errors = {};
+    // Note: validateBody middleware already validated required fields,
+    // but we still do credential validation below
 
     if (!shopifyStore) errors.shopifyStore = 'Store URL required';
     if (!shopifyApiKey) errors.shopifyApiKey = 'API Key required';

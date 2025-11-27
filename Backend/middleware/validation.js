@@ -610,6 +610,117 @@ const commonSchemas = {
       max: 100,
     },
   },
+
+  // ✅ PHASE 2 FIX 4: API Key Validation Schemas
+  shopifyApiKeySchema: {
+    shopifyApiKey: {
+      type: 'string',
+      required: true,
+      minLength: 32,
+      pattern: /^[a-f0-9]{32}$/, // Shopify keys are 32 hex characters
+    },
+  },
+
+  exotelApiKeySchema: {
+    exotelSid: {
+      type: 'string',
+      required: true,
+      minLength: 5,
+    },
+    exotelToken: {
+      type: 'string',
+      required: true,
+      minLength: 20,
+    },
+  },
+
+  openaiApiKeySchema: {
+    openaiApiKey: {
+      type: 'string',
+      required: true,
+      pattern: /^sk-/, // OpenAI keys start with sk-
+      minLength: 20,
+    },
+  },
+
+  phoneNumberSchema: {
+    phoneNumber: {
+      type: 'phone',
+      required: true,
+    },
+  },
+
+  urlSchema: {
+    url: {
+      type: 'url',
+      required: true,
+    },
+  },
+
+  // ✅ PHASE 2 FIX 4: Onboarding complete schema with validation
+  onboardingCompleteSchema: {
+    shopifyStore: {
+      type: 'url',
+      required: true,
+    },
+    shopifyApiKey: {
+      type: 'string',
+      required: true,
+      minLength: 32,
+    },
+    shopifyApiSecret: {
+      type: 'string',
+      required: true,
+      minLength: 32,
+    },
+    exotelNumber: {
+      type: 'phone',
+      required: true,
+    },
+    exotelSid: {
+      type: 'string',
+      required: true,
+      minLength: 5,
+    },
+    exotelToken: {
+      type: 'string',
+      required: true,
+      minLength: 20,
+    },
+    returnWindowDays: {
+      type: 'number',
+      required: false,
+      min: 1,
+      max: 365,
+    },
+    refundAutoThreshold: {
+      type: 'number',
+      required: false,
+      min: 0,
+    },
+    cancelWindowHours: {
+      type: 'number',
+      required: false,
+      min: 0,
+    },
+    escalationThreshold: {
+      type: 'number',
+      required: false,
+      min: 0,
+    },
+    enableWhatsApp: {
+      type: 'boolean',
+      required: false,
+    },
+    enableSMS: {
+      type: 'boolean',
+      required: false,
+    },
+    enableEmail: {
+      type: 'boolean',
+      required: false,
+    },
+  },
 };
 
 module.exports = {

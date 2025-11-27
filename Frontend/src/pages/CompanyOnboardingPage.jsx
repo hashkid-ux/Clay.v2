@@ -19,6 +19,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Building2, Globe, Phone, ArrowRight, Loader } from 'lucide-react';
+import logger from '../utils/logger'; // ✅ PHASE 2 FIX 5: Environment-aware logging
 
 const CompanyOnboardingPage = () => {
   const navigate = useNavigate();
@@ -57,7 +58,8 @@ const CompanyOnboardingPage = () => {
           phone: data.company.phone || '',
         });
       } catch (err) {
-        console.error('Error loading company:', err);
+        // ✅ PHASE 2 FIX 5: Use environment-aware logger
+        logger.error('Error loading company:', err);
         setError(err.message);
       } finally {
         setLoading(false);
@@ -117,7 +119,8 @@ const CompanyOnboardingPage = () => {
       }
 
       setSuccess(true);
-      console.log('✅ Company onboarding completed:', data.company);
+      // ✅ PHASE 2 FIX 5: Use environment-aware logger
+      logger.debug('✅ Company onboarding completed:', data.company);
 
       // Redirect to dashboard after 2 seconds
       setTimeout(() => {

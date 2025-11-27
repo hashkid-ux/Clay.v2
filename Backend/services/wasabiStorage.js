@@ -1,6 +1,13 @@
 // Backend/services/wasabiStorage.js - Wasabi S3-Compatible Storage (HTTP Only - No AWS SDK)
 const axios = require('axios');
 const logger = require('../utils/logger');
+const { executeWithTimeoutAndRetry } = require('../utils/timeoutUtil');
+
+// 🔒 TIMEOUT CONFIGURATION
+const WASABI_UPLOAD_TIMEOUT = 60000; // 60 seconds for large files
+const WASABI_DOWNLOAD_TIMEOUT = 60000; // 60 seconds for large files
+const WASABI_DELETE_TIMEOUT = 30000; // 30 seconds for delete
+const WASABI_LIST_TIMEOUT = 30000; // 30 seconds for list
 
 class WasabiStorage {
   constructor() {

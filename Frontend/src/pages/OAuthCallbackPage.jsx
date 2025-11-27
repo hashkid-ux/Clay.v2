@@ -15,6 +15,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Loader, AlertCircle } from 'lucide-react';
+import logger from '../utils/logger'; // ✅ PHASE 2 FIX 5: Environment-aware logging
 
 const OAuthCallbackPage = () => {
   const navigate = useNavigate();
@@ -43,7 +44,8 @@ const OAuthCallbackPage = () => {
           throw new Error('No refresh token received from authentication provider. Please try logging in again.');
         }
 
-        console.log('✅ [OAuth] Both tokens received from backend');
+        // ✅ PHASE 2 FIX 5: Use environment-aware logger
+        logger.debug('✅ [OAuth] Both tokens received from backend');
 
         // Validate token format (JWT has 3 parts separated by dots)
         const accessParts = accessToken.split('.');
@@ -60,13 +62,15 @@ const OAuthCallbackPage = () => {
         // Step 1: Save tokens to localStorage immediately
         localStorage.setItem('accessToken', accessToken);
         localStorage.setItem('refreshToken', refreshToken);
-        console.log('✅ [OAuth] Both tokens saved to localStorage');
+        // ✅ PHASE 2 FIX 5: Use environment-aware logger
+        logger.debug('✅ [OAuth] Both tokens saved to localStorage');
 
         // Step 2: Decode and save access token data for quick access (without verification)
         // This is safe since the backend already verified it
         try {
           const decoded = JSON.parse(atob(accessParts[1]));
-          console.log('✅ [OAuth] Access token decoded:', {
+          // ✅ PHASE 2 FIX 5: Use environment-aware logger
+          logger.debug('✅ [OAuth] Access token decoded:', {
             userId: decoded.userId,
             email: decoded.email,
             client_id: decoded.client_id,
@@ -80,7 +84,8 @@ const OAuthCallbackPage = () => {
             expiresAt: decoded.exp * 1000, // Convert to milliseconds
           }));
         } catch (decodeError) {
-          console.warn('⚠️  Could not decode token payload, will fetch from server', decodeError);
+          // ✅ PHASE 2 FIX 5: Use environment-aware logger
+          logger.warn('⚠️  Could not decode token payload, will fetch from server', decodeError);
           // Continue anyway, AuthContext will fetch full profile
         }
 
@@ -90,11 +95,13 @@ const OAuthCallbackPage = () => {
         // Step 4: Redirect to dashboard
         // AuthContext useEffect will now find the tokens in localStorage
         // and fetch the full user profile
-        console.log('✅ [OAuth] Redirecting to dashboard');
+        // ✅ PHASE 2 FIX 5: Use environment-aware logger
+        logger.debug('✅ [OAuth] Redirecting to dashboard');
         navigate('/dashboard', { replace: true });
 
       } catch (err) {
-        console.error('❌ [OAuth] Callback error:', err);
+        // ✅ PHASE 2 FIX 5: Use environment-aware logger
+        logger.error('❌ [OAuth] Callback error:', err);
         setError(err.message || 'An unexpected error occurred during authentication');
         setIsProcessing(false);
 

@@ -9,6 +9,27 @@ const { authMiddleware } = require('../auth/authMiddleware');
 const { v4: uuidv4 } = require('uuid');
 const emailService = require('../utils/email');
 
+// 🔒 TIMEOUT PROTECTION: Wrap route handler with timeout
+const withLoginTimeout = (handler) => {
+  return async (req, res) => {
+    const timeoutId = setTimeout(() => {
+      if (!res.headersSent) {
+        logger.error('Login endpoint timeout', { 
+          email: req.body?.email,
+          requestId: req.requestId 
+        });
+        res.status(504).json({ error: 'Login took too long. Please try again.' });
+      }
+    }, 8000); // 8-second timeout for login
+
+    try {
+      await handler(req, res);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  };
+};
+
 /**
  * POST /api/auth/register - Register a new company with admin user
  * Body: { email, password, companyName, firstName, lastName, phone }
@@ -179,7 +200,7 @@ router.post('/verify-email', async (req, res) => {
  * POST /api/auth/login - Login with email and password
  * Body: { email, password }
  */
-router.post('/login', async (req, res) => {
+router.post('/login', withLoginTimeout(async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -286,7 +307,7 @@ router.post('/login', async (req, res) => {
     logger.error('Error during login', { error: error.message });
     res.status(500).json({ error: 'Failed to log in' });
   }
-});
+}));
 
 /**
  * POST /api/auth/refresh - Refresh access token

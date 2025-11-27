@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Mail, Lock, AlertCircle, Loader, Chrome } from 'lucide-react';
+import logger from '../utils/logger'; // ✅ PHASE 2 FIX 5: Environment-aware logging
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
@@ -40,17 +41,33 @@ const LoginPage = () => {
     setError('');
     setLoading(true);
 
+    // 🔒 TIMEOUT PROTECTION: 10-second fetch timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
     try {
       const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify({ email, password }),
+        signal: controller.signal // Add abort signal for timeout
       });
+
+      clearTimeout(timeoutId);
 
       const data = await response.json();
 
       if (!response.ok) {
-        setError(data.error || 'Login failed');
+        // ✅ USER-FRIENDLY ERROR MESSAGES
+        if (response.status === 401) {
+          setError('Invalid email or password. Please try again.');
+        } else if (response.status === 429) {
+          setError('Too many login attempts. Please try again later.');
+        } else if (response.status === 503) {
+          setError('Server is temporarily unavailable. Please try again.');
+        } else {
+          setError(data.error || 'Login failed. Please try again.');
+        }
         return;
       }
 
@@ -69,8 +86,18 @@ const LoginPage = () => {
       navigate('/dashboard');
 
     } catch (error) {
-      setError('Connection error. Please try again.');
-      console.error('Login error:', error);
+      clearTimeout(timeoutId);
+      
+      // ✅ NETWORK ERROR HANDLING
+      if (error.name === 'AbortError') {
+        setError('Login took too long. Please check your internet connection and try again.');
+      } else if (error instanceof TypeError) {
+        setError('Network error. Please check your connection and try again.');
+      } else {
+        setError('Connection error. Please try again.');
+      }
+      // ✅ PHASE 2 FIX 5: Use environment-aware logger
+      logger.error('Login error:', error);
     } finally {
       setLoading(false);
     }

@@ -5,6 +5,7 @@ const resolve = require('../utils/moduleResolver');
 const db = require(resolve('db/postgres'));
 const logger = require(resolve('utils/logger'));
 const { enforceClientAccess } = require(resolve('auth/authMiddleware'));
+const { validateBody, commonSchemas } = require(resolve('middleware/validation')); // ✅ PHASE 2 FIX 4
 
 // GET /api/clients/:id - Get single client (MULTI-TENANT: user can only access their own)
 router.get('/:id', enforceClientAccess, async (req, res) => {
@@ -42,7 +43,7 @@ router.get('/:id', enforceClientAccess, async (req, res) => {
 });
 
 // PUT /api/clients/:id - Update company configuration (MULTI-TENANT: user can only update their own)
-router.put('/:id', enforceClientAccess, async (req, res) => {
+router.put('/:id', enforceClientAccess, validateBody(commonSchemas.onboardingCompleteSchema), async (req, res) => {
   try {
     const { id } = req.params;
     const userClientId = req.user.client_id;
@@ -69,12 +70,7 @@ router.put('/:id', enforceClientAccess, async (req, res) => {
       language
     } = req.body;
 
-    // Validate required fields
-    if (!shopifyStore || !exotelNumber) {
-      return res.status(400).json({ 
-        error: 'Shopify store and Exotel number are required' 
-      });
-    }
+    // Note: validateBody middleware already validated required fields and formats
 
     // Build settings object
     const settings = {

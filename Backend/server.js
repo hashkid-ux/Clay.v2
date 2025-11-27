@@ -165,6 +165,36 @@ logger.info('✅ Session store configured (PostgreSQL - production-ready, secure
 app.use(passport.initialize());
 app.use(passport.session());
 
+// 🔒 TIMEOUT PROTECTION: Set timeouts for all requests
+app.use((req, res, next) => {
+  // Set socket timeout (connection level)
+  req.socket.setTimeout(35000); // 35 seconds
+  res.setTimeout(35000); // 35 seconds
+  
+  // Track request start time for logging
+  req.startTime = Date.now();
+  
+  next();
+});
+
+// Handle timeout responses
+app.use((req, res, next) => {
+  res.on('timeout', () => {
+    const duration = Date.now() - req.startTime;
+    logger.error('Response timeout', { 
+      path: req.path, 
+      method: req.method,
+      duration: `${duration}ms`,
+      requestId: req.requestId 
+    });
+    if (!res.headersSent) {
+      res.status(504).json({ error: 'Request timeout. Please try again.' });
+    }
+  });
+  
+  next();
+});
+
 // Request size limits (security)
 app.use(bodyParser.json({ limit: '1mb' }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '1kb' }));
