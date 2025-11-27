@@ -2,6 +2,9 @@
  * Test Routes - For debugging and verifying integrations
  * GET /api/test/email-connection - Check if email service is working
  * POST /api/test/send-otp - Send test OTP email
+ * 
+ * 🔒 SECURITY: These routes are already disabled in production via server.js
+ * Adding double-check here as defense-in-depth
  */
 
 const express = require('express');
@@ -9,6 +12,45 @@ const router = express.Router();
 const emailService = require('../utils/email');
 const db = require('../db/postgres');
 const logger = require('../utils/logger');
+
+// 🔒 PHASE 1 FIX 1.2: Defense-in-depth - double-check that test routes cannot run in production
+router.use((req, res, next) => {
+  if (process.env.NODE_ENV === 'production') {
+    logger.warn('⚠️  Attempt to access test routes in production', {
+      path: req.path,
+      ip: req.ip,
+      method: req.method
+    });
+    return res.status(403).json({ 
+      error: 'Test routes are not available in production',
+      timestamp: new Date().toISOString()
+    });
+  }
+  
+  // In non-production, require authorization header as additional security
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    logger.warn('Test route access without authorization', {
+      path: req.path,
+      ip: req.ip
+    });
+    return res.status(401).json({
+      error: 'Test routes require Authorization header',
+      example: 'Authorization: Bearer your_dev_token'
+    });
+  }
+  
+  // Verify it matches a dev token (keep this in env for security)
+  if (authHeader !== `Bearer ${process.env.DEV_TEST_TOKEN || 'no-token-configured'}`) {
+    logger.warn('Test route access with invalid token', {
+      path: req.path,
+      ip: req.ip
+    });
+    return res.status(403).json({ error: 'Invalid test authorization token' });
+  }
+  
+  next();
+});
 
 /**
  * Test email service connection

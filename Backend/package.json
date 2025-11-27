@@ -11,7 +11,7 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "init-db": "node scripts/init-db.js",
-    "deploy": "node scripts/init-db.js && node server.js",
+    "deploy": "NODE_ENV=production node scripts/init-db.js && NODE_ENV=production node server.js",
     "test": "jest --coverage",
     "test:watch": "jest --watch",
     "lint": "eslint .",
@@ -30,6 +30,9 @@
   "author": "Caly Voice AI",
   "license": "PROPRIETARY",
   "dependencies": {
+    "@sentry/node": "^7.120.4",
+    "@sentry/profiling-node": "^10.27.0",
+    "@sentry/tracing": "^7.120.4",
     "axios": "^1.6.2",
     "bcrypt": "^5.1.1",
     "body-parser": "^1.20.2",

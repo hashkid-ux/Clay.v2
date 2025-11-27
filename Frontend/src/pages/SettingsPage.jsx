@@ -8,6 +8,10 @@ import {
 } from 'lucide-react';
 import axiosInstance from '../utils/axiosInstance';
 
+if (!process.env.REACT_APP_API_URL && process.env.NODE_ENV === 'production') {
+  throw new Error('❌ CRITICAL: REACT_APP_API_URL environment variable is required in production. Check your .env.production file.');
+}
+
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
 const SettingsPage = () => {

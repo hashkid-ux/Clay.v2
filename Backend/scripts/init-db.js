@@ -67,35 +67,39 @@ async function initializeDatabase() {
       }
     }
     
-    // Insert test client if none exists
-    const clientCheck = await client.query('SELECT COUNT(*) FROM clients');
-    
-    if (parseInt(clientCheck.rows[0].count) === 0) {
-      logger.info('📝 Creating test client...');
+    // Insert test client if none exists (development only)
+    if (process.env.NODE_ENV !== 'production') {
+      const clientCheck = await client.query('SELECT COUNT(*) FROM clients');
       
-      await client.query(`
-        INSERT INTO clients (
-          name, email, phone,
-          shopify_store_url, shopify_api_key,
-          exotel_number,
-          return_window_days, refund_auto_threshold,
-          active
-        ) VALUES (
-          'Demo Store',
-          'demo@caly.ai',
-          '+911234567890',
-          'demo-store.myshopify.com',
-          'demo_api_key',
-          '+918012345678',
-          14,
-          2000,
-          true
-        )
-      `);
-      
-      logger.success('Test client created');
+      if (parseInt(clientCheck.rows[0].count) === 0) {
+        logger.info('📝 Creating test client (development mode)...');
+        
+        await client.query(`
+          INSERT INTO clients (
+            name, email, phone,
+            shopify_store_url, shopify_api_key,
+            exotel_number,
+            return_window_days, refund_auto_threshold,
+            active
+          ) VALUES (
+            'Demo Store',
+            'demo@caly.ai',
+            '+911234567890',
+            'demo-store.myshopify.com',
+            'demo_api_key',
+            '+918012345678',
+            14,
+            2000,
+            true
+          )
+        `);
+        
+        logger.success('✅ Test client created (dev mode only)');
+      } else {
+        logger.info(`✓ Found ${clientCheck.rows[0].count} existing clients`);
+      }
     } else {
-      logger.info(`✓ Found ${clientCheck.rows[0].count} existing clients`);
+      logger.info('⏭️  Skipping test client creation (production mode)');
     }
     
     // Verify tables

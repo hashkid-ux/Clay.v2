@@ -3,6 +3,7 @@ const { v4: uuidv4 } = require('uuid');
 const resolve = require('../utils/moduleResolver');
 const db = require(resolve('db/postgres'));
 const logger = require(resolve('utils/logger'));
+const { queueRecordingUpload } = require(resolve('services/recordingService'));
 
 // Get webhook base URL - strict production validation
 const getWebhookBaseUrl = () => {
@@ -149,8 +150,31 @@ const handleCallEnd = async (req, res) => {
       ip_address: req.ip
     });
 
-    // TODO: Trigger recording download and upload to Wasabi
-    // This will be implemented in Phase 4
+    // 🔒 PHASE 1 FIX 1.3: Queue recording for async download/upload to Wasabi
+    // This doesn't block the webhook response - recording is processed in background
+    if (RecordingUrl) {
+      try {
+        await queueRecordingUpload({
+          callId: call.id,
+          callSid: CallSid,
+          clientId: call.client_id,
+          recordingUrl: RecordingUrl,
+          recordingDuration: req.body.RecordingDuration,
+          exotelNumber: To,
+          fromNumber: From
+        });
+        logger.info('Recording queued for upload', {
+          callId: call.id,
+          recordingUrl: RecordingUrl
+        });
+      } catch (queueError) {
+        // Queue error shouldn't block webhook response - log and continue
+        logger.error('Failed to queue recording upload', {
+          callId: call.id,
+          error: queueError.message
+        });
+      }
+    }
 
     res.status(200).json({ status: 'success' });
 
@@ -204,6 +228,28 @@ const handleRecording = async (req, res) => {
       payload: { CallSid, RecordingUrl, RecordingDuration },
       ip_address: req.ip
     });
+
+    // 🔒 PHASE 1 FIX 1.3: Queue recording for async download/upload to Wasabi
+    // This is a separate webhook, so we queue it independently
+    try {
+      await queueRecordingUpload({
+        callId: call.id,
+        callSid: CallSid,
+        clientId: call.client_id,
+        recordingUrl: RecordingUrl,
+        recordingDuration: RecordingDuration,
+        source: 'separate_webhook'
+      });
+      logger.info('Recording queued from separate webhook', {
+        callId: call.id,
+        recordingUrl: RecordingUrl
+      });
+    } catch (queueError) {
+      logger.error('Failed to queue recording from webhook', {
+        callId: call.id,
+        error: queueError.message
+      });
+    }
 
     res.status(200).json({ status: 'success' });
 

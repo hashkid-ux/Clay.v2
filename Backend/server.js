@@ -9,6 +9,30 @@ initSentry();
 const envValidator = require('./utils/envValidator');
 envValidator.validate();
 
+// ✅ PRODUCTION: Additional validation for production deployments
+if (process.env.NODE_ENV === 'production') {
+  const requiredProductionVars = [
+    'DATABASE_URL',
+    'JWT_SECRET',
+    'FRONTEND_URL',
+    'EXOTEL_API_KEY',
+    'EXOTEL_ACCOUNT_SID',
+    'WASABI_ACCESS_KEY',
+    'WASABI_SECRET_KEY'
+  ];
+  
+  const missingVars = requiredProductionVars.filter(v => !process.env[v]);
+  
+  if (missingVars.length > 0) {
+    console.error('❌ PRODUCTION STARTUP FAILED: Missing required environment variables:');
+    missingVars.forEach(v => console.error(`   - ${v}`));
+    console.error('\n⚠️  Cannot start in production mode without these variables.');
+    process.exit(1);
+  }
+  
+  console.log('✅ All production environment variables validated');
+}
+
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
@@ -222,7 +246,13 @@ app.use((req, res, next) => {
 });
 
 // Request size limits (security)
-app.use(bodyParser.json({ limit: '1mb' }));
+// 🔒 PHASE 1 FIX 1.4: Capture raw body for webhook signature verification
+app.use(bodyParser.json({ 
+  limit: '1mb',
+  verify: (req, res, buf) => {
+    req.rawBody = buf.toString('utf-8');
+  }
+}));
 app.use(bodyParser.urlencoded({ extended: true, limit: '1kb' }));
 app.use(bodyParser.raw({ type: 'audio/wav', limit: '10mb' }));
 
@@ -297,10 +327,12 @@ app.use('/api/auth/resend-otp', resendOtpRateLimiter);
 app.use('/api/auth', require(resolve('routes/auth')));
 
 // Exotel webhooks (with webhook rate limiting)
+// 🔒 PHASE 1 FIX 1.4: Add webhook signature verification
+const { verifyExotelWebhook } = require(resolve('middleware/webhookVerifier'));
 const exotelRoutes = require(resolve('routes/exotel'));
-app.post('/webhooks/exotel/call-start', webhookRateLimiter, exotelRoutes.handleCallStart);
-app.post('/webhooks/exotel/call-end', webhookRateLimiter, exotelRoutes.handleCallEnd);
-app.post('/webhooks/exotel/recording', webhookRateLimiter, exotelRoutes.handleRecording);
+app.post('/webhooks/exotel/call-start', webhookRateLimiter, verifyExotelWebhook, exotelRoutes.handleCallStart);
+app.post('/webhooks/exotel/call-end', webhookRateLimiter, verifyExotelWebhook, exotelRoutes.handleCallEnd);
+app.post('/webhooks/exotel/recording', webhookRateLimiter, verifyExotelWebhook, exotelRoutes.handleRecording);
 
 // Protected dashboard API routes (require authentication)
 const { authMiddleware } = require(resolve('auth/authMiddleware'));
@@ -473,6 +505,11 @@ app.use((req, res, next) => {
 // ✅ PHASE 3: Sentry error handler (before custom error handler)
 app.use(sentryErrorHandler);
 
+// 🔒 PHASE 2 FIX 2.2: Error response standardization middleware
+// Converts all errors to standardized format with consistent HTTP status codes
+const { errorResponseMiddleware } = require(resolve('middleware/errorResponse'));
+app.use(errorResponseMiddleware);
+
 // Error handling middleware - MUST BE LAST
 app.use(errorHandler);
 
@@ -555,6 +592,13 @@ async function startApplication() {
           error: error.message,
         });
       }
+
+      // 🔒 PHASE 2 FIX 2.1: Start session cleanup service
+      // Automatically cleans up expired sessions every 30 minutes
+      // Prevents memory leaks and orphaned connections
+      const sessionCleanup = require('./services/sessionCleanupService');
+      sessionCleanup.startAutomaticCleanup();
+      sessionCleanup.setupGracefulShutdown(server, wss);
 
       // ✅ PHASE 4 FIX 4.2: Schedule database cleanup job
       // Runs every 6 hours to clean up expired OTP, password reset tokens, and blacklisted tokens

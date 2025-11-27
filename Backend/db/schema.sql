@@ -207,27 +207,6 @@ FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
 FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- Insert sample client for testing (remove in production)
-INSERT INTO clients (
-  name, 
-  email,
-  shopify_store_url, 
-  exotel_number,
-  refund_auto_threshold,
-  return_window_days,
-  cancel_window_hours,
-  active
-) VALUES (
-  'Demo Store',
-  'demo@caly.ai',
-  'demo-store.myshopify.com',
-  '+911234567890',
-  2000,
-  14,
-  24,
-  true
-) ON CONFLICT (email) DO NOTHING;
-
 -- Create view for client dashboard (optional but useful)
 CREATE OR REPLACE VIEW client_dashboard_stats AS
 SELECT 

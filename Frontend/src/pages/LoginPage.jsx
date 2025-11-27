@@ -4,6 +4,10 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Mail, Lock, AlertCircle, Loader, Chrome } from 'lucide-react';
 import logger from '../utils/logger'; // ✅ PHASE 2 FIX 5: Environment-aware logging
 
+if (!process.env.REACT_APP_API_URL && process.env.NODE_ENV === 'production') {
+  throw new Error('❌ CRITICAL: REACT_APP_API_URL environment variable is required in production. Check your .env.production file.');
+}
+
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
 const LoginPage = () => {

@@ -47,12 +47,17 @@ async function getAppliedMigrations() {
 }
 
 /**
- * Apply a single migration with proper SQL parsing
+ * Apply a single migration with proper SQL parsing and transaction safety
  * Uses parseSqlStatements instead of naive split(';')
+ * Wraps migration in transaction for rollback capability
  */
 async function applyMigration(name, sql) {
+  const client = await db.pool.connect();
   try {
     logger.info(`📝 Applying migration: ${name}`);
+    
+    // Start transaction
+    await client.query('BEGIN');
     
     // Use proper SQL parser that respects multi-line statements
     const statements = parseSqlStatements(sql);
@@ -61,7 +66,7 @@ async function applyMigration(name, sql) {
     for (const statement of statements) {
       if (statement.trim()) {
         try {
-          await db.query(statement);
+          await client.query(statement);
           statementCount++;
         } catch (stmtError) {
           // Determine if error is ignorable
@@ -80,19 +85,31 @@ async function applyMigration(name, sql) {
     }
     
     // Record migration as applied (only if not already recorded)
-    await db.query(
+    await client.query(
       'INSERT INTO migrations (name) VALUES ($1) ON CONFLICT DO NOTHING',
       [name]
     );
     
+    // Commit transaction
+    await client.query('COMMIT');
+    
     logger.info(`✅ Migration applied: ${name} (${statementCount} statements)`);
     return true;
   } catch (error) {
-    logger.error(`❌ Migration failed: ${name}`, { 
-      error: error.message,
-      code: error.code
-    });
+    // Rollback on error
+    try {
+      await client.query('ROLLBACK');
+      logger.error(`❌ Migration failed and rolled back: ${name}`, { 
+        error: error.message,
+        code: error.code
+      });
+    } catch (rollbackError) {
+      logger.error(`❌ Rollback failed for ${name}`, { error: rollbackError.message });
+    }
     return false;
+  } finally {
+    // Always release the client
+    client.release();
   }
 }
 

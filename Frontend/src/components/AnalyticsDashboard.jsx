@@ -5,6 +5,10 @@ import {
 } from 'recharts';
 import { TrendingUp, AlertCircle, CheckCircle, DollarSign, Zap, Clock, Users } from 'lucide-react';
 
+if (!process.env.REACT_APP_API_URL && process.env.NODE_ENV === 'production') {
+  throw new Error('❌ CRITICAL: REACT_APP_API_URL environment variable is required in production. Check your .env.production file.');
+}
+
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
 // Cost calculation helper
