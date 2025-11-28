@@ -476,7 +476,18 @@ const validateBody = (schema) => {
     const { valid, errors } = validator.validate(req.body);
 
     if (!valid) {
-      throw new ValidationError('Request validation failed', errors);
+      // Transform errors to include field details for frontend error display
+      const fieldDetails = {};
+      Object.entries(errors).forEach(([field, errorMessages]) => {
+        fieldDetails[field] = {
+          valid: false,
+          message: errorMessages[0] || 'Invalid value',
+          errors: errorMessages
+        };
+      });
+      
+      const err = new ValidationError('Some fields need attention', fieldDetails);
+      throw err;
     }
 
     next();
