@@ -11,6 +11,10 @@ export { default as DataTable } from './DataTable';
 export { default as Pagination } from './Pagination';
 export { default as SearchBar } from './SearchBar';
 
+// Form Components
+export { TextInput, PasswordInput, Textarea, Select, Checkbox, RadioGroup } from './FormInputs';
+export { Form, FormGroup, FormSection, FormActions } from './Form';
+
 // Feedback Components
 export { Toast, ToastContainer, useToast } from './Toast';
 export { default as Modal } from './Modal';
