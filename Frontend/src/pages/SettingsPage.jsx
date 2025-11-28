@@ -453,9 +453,10 @@ const SettingsPage = () => {
           {/* Channels Tab */}
           {activeTab === 'channels' && (
             <div>
-              <h2 className="text-lg font-bold text-gray-900 mb-4">Communication Channels</h2>
-              <div className="space-y-4">
-                <label className="flex items-center p-3 border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">
+              <h2 className="text-lg font-bold text-gray-900 mb-2">Communication Channels</h2>
+              <p className="text-sm text-gray-600 mb-6">Enable or disable communication channels for customer notifications</p>
+              <div className="space-y-3">
+                <label className="flex items-center p-4 border-2 border-gray-300 rounded-lg hover:border-blue-400 cursor-pointer transition-colors">
                   <input
                     type="checkbox"
                     checked={formData.enableWhatsApp}
@@ -465,11 +466,11 @@ const SettingsPage = () => {
                   />
                   <div className="ml-3">
                     <p className="font-medium text-gray-900">WhatsApp Support</p>
-                    <p className="text-sm text-gray-500">Enable WhatsApp as a communication channel</p>
+                    <p className="text-sm text-gray-600">Enable WhatsApp as a primary communication channel</p>
                   </div>
                 </label>
 
-                <label className="flex items-center p-3 border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">
+                <label className="flex items-center p-4 border-2 border-gray-300 rounded-lg hover:border-blue-400 cursor-pointer transition-colors">
                   <input
                     type="checkbox"
                     checked={formData.enableSMS}
@@ -479,11 +480,11 @@ const SettingsPage = () => {
                   />
                   <div className="ml-3">
                     <p className="font-medium text-gray-900">SMS Notifications</p>
-                    <p className="text-sm text-gray-500">Send SMS updates to customers</p>
+                    <p className="text-sm text-gray-600">Send SMS alerts and updates to customers (enabled by default)</p>
                   </div>
                 </label>
 
-                <label className="flex items-center p-3 border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">
+                <label className="flex items-center p-4 border-2 border-gray-300 rounded-lg hover:border-blue-400 cursor-pointer transition-colors">
                   <input
                     type="checkbox"
                     checked={formData.enableEmail}
@@ -493,7 +494,7 @@ const SettingsPage = () => {
                   />
                   <div className="ml-3">
                     <p className="font-medium text-gray-900">Email Notifications</p>
-                    <p className="text-sm text-gray-500">Send email updates to customers</p>
+                    <p className="text-sm text-gray-600">Send email updates to customers (enabled by default)</p>
                   </div>
                 </label>
               </div>
