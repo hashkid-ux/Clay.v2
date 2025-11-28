@@ -27,6 +27,11 @@ export { default as Card } from './Card';
 export { default as Accordion } from './Accordion';
 export { default as Button } from './Button';
 
+// Localization & Theme
+export { default as LanguageSwitcher } from './LanguageSwitcher';
+export { default as ThemeSwitcher } from './ThemeSwitcher';
+export { default as AccessibilityChecklist } from './AccessibilityChecklist';
+
 // Layout
 export { default as ProtectedRoute } from './ProtectedRoute';
 export { default as OnboardingGuard } from './OnboardingGuard';
